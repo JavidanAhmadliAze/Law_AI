@@ -1,0 +1,7 @@
+FROM apache/airflow:2.10.4-python3.12
+
+# project services are imported by DAGs (thin DAGs call into law_ai.services)
+ENV PYTHONPATH="/opt/airflow/src:${PYTHONPATH}"
+
+COPY airflow/requirements-airflow.txt /tmp/requirements-airflow.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-airflow.txt

@@ -1,0 +1,143 @@
+"""Retrieval evaluation as a Langfuse experiment.
+
+    uv run python -m evaluation.runners.run_langfuse_experiment
+
+Unlike run_eval (local JSON report), this pushes everything to Langfuse:
+- golden questions become items of the "civil-retrieval" dataset,
+- each run is a named experiment run — one trace per question, with the
+  service's "retrieval" span (chunk-level RRF/rerank scores) nested inside,
+- hit@5 / recall@5 / mrr / ndcg@5 attach to each trace as scores.
+
+Compare runs in the UI under Datasets → civil-retrieval → Runs (e.g. when
+swapping embedding/reranker models).
+"""
+
+import asyncio
+import contextlib
+import hashlib
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from langfuse.experiment import Evaluation
+
+from evaluation.config import EvalConfig
+from evaluation.retrieval import metrics
+from law_ai.dependencies import get_settings
+from law_ai.services.embedding.factory import EmbedderFactory
+from law_ai.services.langfuse.factory import LangfuseFactory
+from law_ai.services.llm.factory import LLMFactory
+from law_ai.services.opensearch.factory import SearchServiceFactory
+from law_ai.services.translation.base import Direction
+from law_ai.services.translation.factory import TranslatorFactory
+
+DATASET_NAME = "civil-retrieval"
+_K = 5
+
+
+def _sync_dataset(client: Any, rows: list[dict]) -> None:
+    """Upsert golden rows as dataset items (stable ids → idempotent)."""
+    client.create_dataset(
+        name=DATASET_NAME,
+        description="Civil-law retrieval golden set (EN questions, act-qualified articles)",
+    )
+    for row in rows:
+        item_id = hashlib.sha256(row["question"].encode()).hexdigest()[:16]
+        client.create_dataset_item(
+            dataset_name=DATASET_NAME,
+            id=item_id,
+            input={"question": row["question"], "language": row["language"]},
+            expected_output={"articles": row["expected_articles"]},
+            metadata={"acts": sorted({a.split(":")[0] for a in row["expected_articles"]})},
+        )
+
+
+def _evaluate(*, input: Any, output: Any, expected_output: Any, **kwargs: Any) -> list[Evaluation]:
+    retrieved = output["retrieved"]
+    expected = set(expected_output["articles"])
+    return [
+        Evaluation(name="hit@5", value=metrics.hit_rate_at_k(retrieved, expected, _K)),
+        Evaluation(name="recall@5", value=metrics.recall_at_k(retrieved, expected, _K)),
+        Evaluation(name="mrr", value=metrics.mrr(retrieved, expected)),
+        Evaluation(name="ndcg@5", value=metrics.ndcg_at_k(retrieved, expected, _K)),
+    ]
+
+
+def main() -> None:
+    config = EvalConfig()
+    settings = get_settings()
+    if not settings.langfuse.enabled:
+        raise SystemExit("LANGFUSE__ENABLED=false — this runner needs Langfuse")
+
+    tracer = LangfuseFactory.create(settings)
+    tracer.callback_handler()  # initializes the global Langfuse client
+    from langfuse import get_client
+
+    client = get_client()
+
+    rows = [
+        json.loads(line)
+        for line in Path(config.dataset_path).read_text().splitlines()
+        if line.strip()
+    ]
+    _sync_dataset(client, rows)
+
+    # run_experiment drives its own event loop (run_async_safely), so all
+    # async clients must be created INSIDE that loop — lazy init on first task,
+    # locked so concurrent first tasks don't double-load the reranker
+    services: dict[str, Any] = {}
+    init_lock = asyncio.Lock()
+
+    async def _ensure_services() -> dict[str, Any]:
+        async with init_lock:
+            if not services:
+                embedder = EmbedderFactory.create(settings)
+                search = SearchServiceFactory.create(settings, embedder, tracer=tracer)
+                await search.startup()
+                services["search"] = search
+                services["translator"] = TranslatorFactory.create(
+                    settings, llm=LLMFactory.create(settings)
+                )
+        return services
+
+    async def task(*, item: Any, **kwargs: Any) -> dict:
+        svc = await _ensure_services()
+        question = item.input["question"]
+        query = question
+        if item.input.get("language") == "en":
+            query = await svc["translator"].translate(query, Direction.EN_TO_PL)
+        results = await svc["search"].retrieve(query, top_k=_K)
+        retrieved: list[str] = []
+        for r in results:
+            key = f"{r.chunk.metadata.act}:{r.chunk.metadata.article}"
+            if key not in retrieved:
+                retrieved.append(key)
+        return {"translated_query": query, "retrieved": retrieved}
+
+    dataset = client.get_dataset(DATASET_NAME)
+    run_name = (
+        f"bge-m3+{settings.reranker.model.split('/')[-1] or 'no-rerank'}"
+        f"-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
+    )
+    try:
+        result = dataset.run_experiment(
+            name="civil-retrieval",
+            run_name=run_name,
+            description="EN→PL LLM translation, hybrid RRF, cross-encoder rerank",
+            task=task,
+            evaluators=[_evaluate],
+            max_concurrency=2,  # CPU reranker — don't thrash it
+        )
+    finally:
+        if "search" in services:  # best-effort close from a fresh loop
+            with contextlib.suppress(Exception):
+                asyncio.run(services["search"].teardown())
+        tracer.shutdown()
+
+    print(f"run: {run_name} — {len(result.item_results)} items")
+    print("View: Langfuse UI → Datasets → civil-retrieval → Runs")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,109 @@
+"""Application entrypoint.
+
+The lifespan initializes the database and all services via their factories
+and parks them on app.state; shutdown tears everything down in reverse.
+
+The RAG stack (llm/embedding/opensearch/translation/agents) is optional at
+boot: with incomplete model config the API still serves auth/chats/health,
+and /ask answers 503 until the models are configured.
+"""
+
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
+
+from fastapi import FastAPI
+
+from law_ai.database import DatabaseFactory
+from law_ai.dependencies import get_settings
+from law_ai.exceptions import register_exception_handlers
+from law_ai.logging import get_logger, setup_logging
+from law_ai.middleware import register_middleware
+from law_ai.routers import ask, auth, chats, health
+
+logger = get_logger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    setup_logging(settings)
+    stack = AsyncExitStack()
+
+    # --- database (users + conversations) --------------------------------
+    db = DatabaseFactory.create(settings)
+    await db.startup()
+    app.state.db = db
+
+    # --- services → agent graph ------------------------------------------
+    app.state.agentic_rag = None
+    app.state.langfuse = None
+    app.state.search = None
+    try:
+        from law_ai.services.agents.factory import AgentGraphFactory
+        from law_ai.services.embedding.factory import EmbedderFactory
+        from law_ai.services.langfuse.factory import LangfuseFactory
+        from law_ai.services.llm.factory import LLMFactory
+        from law_ai.services.opensearch.factory import SearchServiceFactory
+        from law_ai.services.translation.factory import TranslatorFactory
+
+        llm = LLMFactory.create(settings)
+        embedder = EmbedderFactory.create(settings)
+        app.state.langfuse = LangfuseFactory.create(settings)
+        search = SearchServiceFactory.create(settings, embedder, tracer=app.state.langfuse)
+        await search.startup()
+        app.state.search = search
+        translator = TranslatorFactory.create(settings, llm=llm)
+
+        checkpointer = None
+        try:
+            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+            checkpointer = await stack.enter_async_context(
+                AsyncPostgresSaver.from_conn_string(settings.postgres.sync_dsn)
+            )
+            await checkpointer.setup()
+        except Exception as exc:  # graph still works, just without thread memory
+            logger.warning("checkpointer.unavailable", error=str(exc))
+
+        app.state.agentic_rag = AgentGraphFactory.create(
+            llm=llm, search=search, translator=translator, checkpointer=checkpointer
+        )
+        logger.info("rag.ready")
+    except (ValueError, Exception) as exc:  # noqa: BLE001 — degraded boot is intentional
+        logger.warning("rag.disabled", reason=str(exc))
+
+    logger.info("app.startup", env=settings.app.env)
+    yield
+
+    if app.state.search is not None:
+        await app.state.search.teardown()
+    if app.state.langfuse is not None:
+        app.state.langfuse.shutdown()
+    await stack.aclose()
+    await db.teardown()
+    logger.info("app.shutdown")
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="Law-AI",
+        description="Agentic RAG over Polish law",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
+    register_middleware(app)
+    register_exception_handlers(app)
+
+    app.include_router(health.router)
+    app.include_router(auth.router)
+    app.include_router(chats.router)
+    app.include_router(ask.router)
+
+    from law_ai.gradio_app import mount_gradio
+
+    mount_gradio(app)  # chat UI at /ui
+
+    return app
+
+
+app = create_app()

@@ -1,0 +1,33 @@
+# --- secrets / env ---
+.env
+.env.*
+!.env.example
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# --- data / artifacts ---
+data/
+*.pdf
+evaluation/reports/*
+!evaluation/reports/.gitkeep
+
+# --- airflow runtime ---
+airflow/logs/
+airflow/airflow.db
+airflow/webserver_config.py
+
+# --- ide / os ---
+.idea/
+.vscode/
+.DS_Store

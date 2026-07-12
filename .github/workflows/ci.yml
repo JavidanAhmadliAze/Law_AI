@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: uv sync --group dev
+      - name: Lint
+        run: |
+          uv run ruff check src tests
+          uv run ruff format --check src tests
+      - name: Typecheck
+        run: uv run mypy
+      - name: Unit tests
+        run: uv run pytest tests/unit -q
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: quality
+    if: github.event_name == 'pull_request'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lawai
+          POSTGRES_PASSWORD: lawai
+          POSTGRES_DB: lawai
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U lawai"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: uv sync --group dev
+      - name: Integration tests
+        env:
+          POSTGRES__HOST: localhost
+        run: uv run pytest tests/integration -q -m integration

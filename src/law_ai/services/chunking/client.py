@@ -49,7 +49,9 @@ class ArticleChunker(BaseChunker):
         if not article_matches:
             logger.warning("chunking.no_articles_found")
             for paragraph in self._split_paragraphs(text):
-                pieces = self._split_long(paragraph, article="", chapter="", start_position=position)
+                pieces = self._split_long(
+                    paragraph, article="", chapter="", start_position=position
+                )
                 chunks.extend(pieces)
                 position += len(pieces)
             return chunks

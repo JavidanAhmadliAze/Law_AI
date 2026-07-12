@@ -36,9 +36,7 @@ class LocalEmbedder(BaseEmbedder):
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         model = await self._ensure_model()
-        vectors = await asyncio.to_thread(
-            partial(model.encode, texts, normalize_embeddings=True)
-        )
+        vectors = await asyncio.to_thread(partial(model.encode, texts, normalize_embeddings=True))
         return [v.tolist() for v in vectors]
 
     async def embed_query(self, text: str) -> list[float]:

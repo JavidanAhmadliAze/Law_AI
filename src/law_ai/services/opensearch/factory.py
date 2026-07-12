@@ -8,7 +8,5 @@ from law_ai.services.opensearch.client import OpenSearchService
 
 class SearchServiceFactory:
     @staticmethod
-    def create(
-        settings: Settings, embedder: BaseEmbedder, tracer: Any = None
-    ) -> BaseSearchService:
+    def create(settings: Settings, embedder: BaseEmbedder, tracer: Any = None) -> BaseSearchService:
         return OpenSearchService(settings.opensearch, settings.reranker, embedder, tracer=tracer)

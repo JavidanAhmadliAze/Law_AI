@@ -9,22 +9,22 @@ from typing import Any
 from evaluation.config import EvalConfig
 from evaluation.generation.metrics import citation_accuracy, judge_answer
 from law_ai.dependencies import get_settings
-from law_ai.services.agents.factory import AgentGraphFactory
-from law_ai.services.embedding.factory import EmbedderFactory
-from law_ai.services.llm.factory import LLMFactory
-from law_ai.services.opensearch.factory import SearchServiceFactory
-from law_ai.services.translation.factory import TranslatorFactory
+from law_ai.services.agents.factory import create_agent_graph
+from law_ai.services.embedding.factory import create_embedder
+from law_ai.services.llm.factory import create_llm
+from law_ai.services.opensearch.factory import create_search_service
+from law_ai.services.translation.factory import create_translator
 
 
 async def evaluate_generation(config: EvalConfig) -> dict[str, Any]:
     settings = get_settings()
-    llm = LLMFactory.create(settings)
-    embedder = EmbedderFactory.create(settings)
-    search = SearchServiceFactory.create(settings, embedder)
-    translator = TranslatorFactory.create(settings, llm=llm)
+    llm = create_llm(settings)
+    embedder = create_embedder(settings)
+    search = create_search_service(settings, embedder)
+    translator = create_translator(settings, llm=llm)
     await search.startup()
 
-    graph = AgentGraphFactory.create(llm=llm, search=search, translator=translator)
+    graph = create_agent_graph(llm=llm, search=search, translator=translator)
 
     rows = [
         json.loads(line)

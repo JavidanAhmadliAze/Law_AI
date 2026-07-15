@@ -18,8 +18,8 @@ from typing import Any
 from evaluation.config import EvalConfig
 from evaluation.retrieval import metrics
 from law_ai.dependencies import get_settings
-from law_ai.services.embedding.factory import EmbedderFactory
-from law_ai.services.opensearch.factory import SearchServiceFactory
+from law_ai.services.embedding.factory import create_embedder
+from law_ai.services.opensearch.factory import create_search_service
 from law_ai.services.translation.base import BaseTranslator, Direction
 from law_ai.services.translation.client import GlossaryOnlyTranslator
 
@@ -27,11 +27,11 @@ from law_ai.services.translation.client import GlossaryOnlyTranslator
 def _make_translator(settings: Any) -> tuple[BaseTranslator, str]:
     """Production translator when the LLM is configured, glossary fallback."""
     try:
-        from law_ai.services.llm.factory import LLMFactory
-        from law_ai.services.translation.factory import TranslatorFactory
+        from law_ai.services.llm.factory import create_llm
+        from law_ai.services.translation.factory import create_translator
 
-        llm = LLMFactory.create(settings)
-        return TranslatorFactory.create(settings, llm=llm), "llm"
+        llm = create_llm(settings)
+        return create_translator(settings, llm=llm), "llm"
     except Exception:
         return GlossaryOnlyTranslator(), "glossary-only"
 
@@ -47,8 +47,8 @@ def _dedup_articles(chunks: list[Any]) -> list[str]:
 
 async def evaluate_retrieval(config: EvalConfig) -> dict[str, Any]:
     settings = get_settings()
-    embedder = EmbedderFactory.create(settings)
-    search = SearchServiceFactory.create(settings, embedder)
+    embedder = create_embedder(settings)
+    search = create_search_service(settings, embedder)
     translator, translator_kind = _make_translator(settings)
     await search.startup()
 
@@ -95,10 +95,7 @@ async def evaluate_retrieval(config: EvalConfig) -> dict[str, Any]:
         "queries": len(per_query),
         "translator": translator_kind,
         "mrr": round(mean(q["mrr"] for q in per_query), 4),
-        **{
-            f"hit@{k}": round(mean(q[f"hit@{k}"] for q in per_query), 4)
-            for k in config.k_values
-        },
+        **{f"hit@{k}": round(mean(q[f"hit@{k}"] for q in per_query), 4) for k in config.k_values},
         **{
             f"recall@{k}": round(mean(q[f"recall@{k}"] for q in per_query), 4)
             for k in config.k_values

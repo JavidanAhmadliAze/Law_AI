@@ -17,12 +17,12 @@ import sys
 from law_ai.acts import LegalAct, acts_for_domain, get_act
 from law_ai.dependencies import get_settings
 from law_ai.logging import get_logger, setup_logging
-from law_ai.services.chunking.factory import ChunkerFactory
-from law_ai.services.embedding.factory import EmbedderFactory
-from law_ai.services.fetcher.factory import FetcherFactory
-from law_ai.services.metadata.factory import MetadataBuilderFactory
-from law_ai.services.opensearch.factory import SearchServiceFactory
-from law_ai.services.pdf_parser.factory import PDFParserFactory
+from law_ai.services.chunking.factory import create_chunker
+from law_ai.services.embedding.factory import create_embedder
+from law_ai.services.fetcher.factory import create_fetcher
+from law_ai.services.metadata.factory import create_metadata_builder
+from law_ai.services.opensearch.factory import create_search_service
+from law_ai.services.pdf_parser.factory import create_pdf_parser
 
 logger = get_logger("ingest")
 
@@ -31,10 +31,10 @@ async def main(acts: list[LegalAct], dry_run: bool) -> int:
     settings = get_settings()
     setup_logging(settings)
 
-    fetcher = FetcherFactory.create(settings)
-    parser = PDFParserFactory.create(settings)
-    chunker = ChunkerFactory.create(settings)
-    metadata_builder = MetadataBuilderFactory.create(settings)
+    fetcher = create_fetcher(settings)
+    parser = create_pdf_parser(settings)
+    chunker = create_chunker(settings)
+    metadata_builder = create_metadata_builder(settings)
 
     all_chunks = []
     for act in acts:
@@ -56,8 +56,8 @@ async def main(acts: list[LegalAct], dry_run: bool) -> int:
             )
         return 0
 
-    embedder = EmbedderFactory.create(settings)
-    search = SearchServiceFactory.create(settings, embedder)
+    embedder = create_embedder(settings)
+    search = create_search_service(settings, embedder)
     await search.startup()
     try:
         count = await search.index_chunks(all_chunks)

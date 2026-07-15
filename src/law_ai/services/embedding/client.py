@@ -48,18 +48,18 @@ class LocalEmbedder(BaseEmbedder):
 
 
 class APIEmbedder(BaseEmbedder):
-    # TEI rejects oversized client batches; whole acts are embedded at ingest,
-    # so requests must be chunked (CPU inference also needs a generous timeout)
-    _BATCH_SIZE = 32
-
     def __init__(self, settings: EmbeddingSettings) -> None:
         self._settings = settings
-        self._client = httpx.AsyncClient(base_url=settings.api_url, timeout=300.0)
+        self._client = httpx.AsyncClient(
+            base_url=settings.api_url, timeout=settings.timeout_seconds
+        )
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        # whole acts are embedded at ingest — batch the requests
+        batch_size = self._settings.batch_size
         vectors: list[list[float]] = []
-        for offset in range(0, len(texts), self._BATCH_SIZE):
-            batch = texts[offset : offset + self._BATCH_SIZE]
+        for offset in range(0, len(texts), batch_size):
+            batch = texts[offset : offset + batch_size]
             response = await self._client.post("/embed", json={"inputs": batch})
             response.raise_for_status()
             vectors.extend(response.json())

@@ -9,14 +9,12 @@ from law_ai.services.opensearch.base import BaseSearchService
 from law_ai.services.translation.base import BaseTranslator
 
 
-class AgentGraphFactory:
-    @staticmethod
-    def create(
-        *,
-        llm: BaseLLM,
-        search: BaseSearchService,
-        translator: BaseTranslator,
-        checkpointer: Any = None,
-    ) -> Any:
-        services = AgentServices(llm=llm, search=search, translator=translator)
-        return build_agentic_rag(services, checkpointer=checkpointer)
+def create_agent_graph(
+    *,
+    llm: BaseLLM,
+    search: BaseSearchService,
+    translator: BaseTranslator,
+    checkpointer: Any = None,
+) -> Any:
+    services = AgentServices(llm=llm, search=search, translator=translator)
+    return build_agentic_rag(services, checkpointer=checkpointer)

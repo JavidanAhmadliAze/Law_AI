@@ -51,7 +51,7 @@ def build_gradio_ui(app: FastAPI) -> gr.Blocks:
                 "/auth/register", json={"username": username, "password": password}
             )
         if response.status_code == 201:
-            return "✅ Registered — now log in."
+            return " Registered — now log in."
         return f"❌ {response.json().get('detail', 'Registration failed')}"
 
     async def fetch_chats(token: str) -> list[tuple[str, str]]:

@@ -43,9 +43,9 @@ def _build_domain_dag(domain: str) -> None:
         def fetching(act_id: str) -> str:
             from law_ai.acts import get_act
             from law_ai.config import Settings
-            from law_ai.services.fetcher.factory import FetcherFactory
+            from law_ai.services.fetcher.factory import create_fetcher
 
-            fetcher = FetcherFactory.create(Settings())
+            fetcher = create_fetcher(Settings())
             pdf_bytes = asyncio.run(fetcher.fetch(get_act(act_id).url))
 
             DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -56,9 +56,9 @@ def _build_domain_dag(domain: str) -> None:
         def pdf_parsing(act_id: str) -> str:
             from law_ai.acts import get_act
             from law_ai.config import Settings
-            from law_ai.services.pdf_parser.factory import PDFParserFactory
+            from law_ai.services.pdf_parser.factory import create_pdf_parser
 
-            parser = PDFParserFactory.create(Settings())
+            parser = create_pdf_parser(Settings())
             document = parser.parse(
                 (DATA_DIR / f"{act_id}.pdf").read_bytes(), source_url=get_act(act_id).url
             )
@@ -68,9 +68,9 @@ def _build_domain_dag(domain: str) -> None:
         @task
         def chunking(act_id: str) -> str:
             from law_ai.config import Settings
-            from law_ai.services.chunking.factory import ChunkerFactory
+            from law_ai.services.chunking.factory import create_chunker
 
-            chunker = ChunkerFactory.create(Settings())
+            chunker = create_chunker(Settings())
             raw_chunks = chunker.chunk((DATA_DIR / f"{act_id}.txt").read_text())
             (DATA_DIR / f"{act_id}.raw_chunks.json").write_text(
                 json.dumps([c.model_dump() for c in raw_chunks])
@@ -82,9 +82,9 @@ def _build_domain_dag(domain: str) -> None:
             from law_ai.acts import get_act
             from law_ai.config import Settings
             from law_ai.services.chunking.base import RawChunk
-            from law_ai.services.metadata.factory import MetadataBuilderFactory
+            from law_ai.services.metadata.factory import create_metadata_builder
 
-            builder = MetadataBuilderFactory.create(Settings())
+            builder = create_metadata_builder(Settings())
             raw_chunks = [
                 RawChunk(**item)
                 for item in json.loads((DATA_DIR / f"{act_id}.raw_chunks.json").read_text())
@@ -100,8 +100,8 @@ def _build_domain_dag(domain: str) -> None:
             """Embeds (inside the search service) + upserts into OpenSearch."""
             from law_ai.config import Settings
             from law_ai.schemas.chunk import LawChunk
-            from law_ai.services.embedding.factory import EmbedderFactory
-            from law_ai.services.opensearch.factory import SearchServiceFactory
+            from law_ai.services.embedding.factory import create_embedder
+            from law_ai.services.opensearch.factory import create_search_service
 
             settings = Settings()
             chunks = [
@@ -110,8 +110,8 @@ def _build_domain_dag(domain: str) -> None:
             ]
 
             async def _run() -> int:
-                embedder = EmbedderFactory.create(settings)
-                search = SearchServiceFactory.create(settings, embedder)
+                embedder = create_embedder(settings)
+                search = create_search_service(settings, embedder)
                 await search.startup()
                 try:
                     return await search.index_chunks(chunks)

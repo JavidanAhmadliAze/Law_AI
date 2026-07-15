@@ -25,12 +25,12 @@ from langfuse.experiment import Evaluation
 from evaluation.config import EvalConfig
 from evaluation.retrieval import metrics
 from law_ai.dependencies import get_settings
-from law_ai.services.embedding.factory import EmbedderFactory
-from law_ai.services.langfuse.factory import LangfuseFactory
-from law_ai.services.llm.factory import LLMFactory
-from law_ai.services.opensearch.factory import SearchServiceFactory
+from law_ai.services.embedding.factory import create_embedder
+from law_ai.services.langfuse.factory import create_langfuse
+from law_ai.services.llm.factory import create_llm
+from law_ai.services.opensearch.factory import create_search_service
 from law_ai.services.translation.base import Direction
-from law_ai.services.translation.factory import TranslatorFactory
+from law_ai.services.translation.factory import create_translator
 
 DATASET_NAME = "civil-retrieval"
 _K = 5
@@ -70,7 +70,7 @@ def main() -> None:
     if not settings.langfuse.enabled:
         raise SystemExit("LANGFUSE__ENABLED=false — this runner needs Langfuse")
 
-    tracer = LangfuseFactory.create(settings)
+    tracer = create_langfuse(settings)
     tracer.callback_handler()  # initializes the global Langfuse client
     from langfuse import get_client
 
@@ -92,13 +92,11 @@ def main() -> None:
     async def _ensure_services() -> dict[str, Any]:
         async with init_lock:
             if not services:
-                embedder = EmbedderFactory.create(settings)
-                search = SearchServiceFactory.create(settings, embedder, tracer=tracer)
+                embedder = create_embedder(settings)
+                search = create_search_service(settings, embedder, tracer=tracer)
                 await search.startup()
                 services["search"] = search
-                services["translator"] = TranslatorFactory.create(
-                    settings, llm=LLMFactory.create(settings)
-                )
+                services["translator"] = create_translator(settings, llm=create_llm(settings))
         return services
 
     async def task(*, item: Any, **kwargs: Any) -> dict:

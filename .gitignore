@@ -19,6 +19,7 @@ build/
 # --- data / artifacts ---
 data/
 *.pdf
+*.log
 evaluation/reports/*
 !evaluation/reports/.gitkeep
 

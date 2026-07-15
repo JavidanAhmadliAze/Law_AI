@@ -2,7 +2,7 @@
 
 The agents service consumes other services — it never constructs them.
 main.py's lifespan builds this container via the factories and hands it to
-AgentGraphFactory.
+create_agent_graph.
 """
 
 from dataclasses import dataclass

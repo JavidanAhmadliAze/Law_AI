@@ -13,7 +13,7 @@ class AppSettings(BaseModel):
     env: str = "local"  # local | staging | prod
     debug: bool = False
     log_level: str = "INFO"
-    secret_key: str = "change-me"  # JWT signing key
+    secret_key: str = ""  # JWT signing key
     access_token_expire_minutes: int = 1440
 
 
@@ -60,6 +60,8 @@ class EmbeddingSettings(BaseModel):
     provider: str = "local"  # local | api | bedrock
     api_url: str = ""
     dimension: int = 1024
+    batch_size: int = 32  # texts per embed request (TEI rejects oversized batches)
+    timeout_seconds: float = 300.0  # generous: CPU inference on big batches is slow
 
 
 class RerankerSettings(BaseModel):

@@ -6,7 +6,7 @@ from law_ai.services.opensearch.base import BaseSearchService
 from law_ai.services.opensearch.client import OpenSearchService
 
 
-class SearchServiceFactory:
-    @staticmethod
-    def create(settings: Settings, embedder: BaseEmbedder, tracer: Any = None) -> BaseSearchService:
-        return OpenSearchService(settings.opensearch, settings.reranker, embedder, tracer=tracer)
+def create_search_service(
+    settings: Settings, embedder: BaseEmbedder, tracer: Any = None
+) -> BaseSearchService:
+    return OpenSearchService(settings.opensearch, settings.reranker, embedder, tracer=tracer)

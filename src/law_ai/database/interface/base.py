@@ -39,7 +39,7 @@ class BaseDatabase(ABC):
     async def health_check(self) -> bool:
         """Cheap connectivity probe (SELECT 1) for /health."""
 
-    # Helper for FastAPI dependencies -------------------------------------
+    # Helper for FastAPI dependencies ------------------------------------
     async def iter_session(self) -> AsyncIterator[AsyncSession]:
         """Adapter so `session()` can be used as a FastAPI dependency."""
         async with self.session() as session:

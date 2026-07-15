@@ -13,7 +13,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 
-from law_ai.database import DatabaseFactory
+from law_ai.database import create_database
 from law_ai.dependencies import get_settings
 from law_ai.exceptions import register_exception_handlers
 from law_ai.logging import get_logger, setup_logging
@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     stack = AsyncExitStack()
 
     # --- database (users + conversations) --------------------------------
-    db = DatabaseFactory.create(settings)
+    db = create_database(settings)
     await db.startup()
     app.state.db = db
 
@@ -39,20 +39,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.langfuse = None
     app.state.search = None
     try:
-        from law_ai.services.agents.factory import AgentGraphFactory
-        from law_ai.services.embedding.factory import EmbedderFactory
-        from law_ai.services.langfuse.factory import LangfuseFactory
-        from law_ai.services.llm.factory import LLMFactory
-        from law_ai.services.opensearch.factory import SearchServiceFactory
-        from law_ai.services.translation.factory import TranslatorFactory
+        from law_ai.services.agents.factory import create_agent_graph
+        from law_ai.services.embedding.factory import create_embedder
+        from law_ai.services.langfuse.factory import create_langfuse
+        from law_ai.services.llm.factory import create_llm
+        from law_ai.services.opensearch.factory import create_search_service
+        from law_ai.services.translation.factory import create_translator
 
-        llm = LLMFactory.create(settings)
-        embedder = EmbedderFactory.create(settings)
-        app.state.langfuse = LangfuseFactory.create(settings)
-        search = SearchServiceFactory.create(settings, embedder, tracer=app.state.langfuse)
+        llm = create_llm(settings)
+        embedder = create_embedder(settings)
+        app.state.langfuse = create_langfuse(settings)
+        search = create_search_service(settings, embedder, tracer=app.state.langfuse)
         await search.startup()
         app.state.search = search
-        translator = TranslatorFactory.create(settings, llm=llm)
+        translator = create_translator(settings, llm=llm)
 
         checkpointer = None
         try:
@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as exc:  # graph still works, just without thread memory
             logger.warning("checkpointer.unavailable", error=str(exc))
 
-        app.state.agentic_rag = AgentGraphFactory.create(
+        app.state.agentic_rag = create_agent_graph(
             llm=llm, search=search, translator=translator, checkpointer=checkpointer
         )
         logger.info("rag.ready")

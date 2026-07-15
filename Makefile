@@ -19,7 +19,8 @@ format:             ## Auto-fix lint + format
 	uv run ruff check --fix src tests
 	uv run ruff format src tests
 
-typecheck:          ## Mypy
+typecheck:          ## Mypy (gradio import first: it generates its .pyi stubs on first import)
+	uv run python -c "import gradio"
 	uv run mypy
 
 # ---------------------------------------------------------------- tests ----

@@ -1,6 +1,7 @@
 """Query rewriter — resolves references, decomposes, routes simple|complex."""
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from law_ai.logging import get_logger
 from law_ai.services.agents import prompts
@@ -12,8 +13,10 @@ from law_ai.services.agents.state import GraphState
 logger = get_logger(__name__)
 
 
-def build_query_rewriter(services: AgentServices) -> Callable[[GraphState], Awaitable[dict]]:
-    async def query_rewriter(state: GraphState) -> dict:
+def build_query_rewriter(
+    services: AgentServices,
+) -> Callable[[GraphState], Awaitable[dict[str, Any]]]:
+    async def query_rewriter(state: GraphState) -> dict[str, Any]:
         question = state["question"]
         language = await services.translator.detect_language(question)
 

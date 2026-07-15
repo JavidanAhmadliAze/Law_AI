@@ -5,6 +5,7 @@ so the graph can end immediately with a polite refusal.
 """
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from law_ai.logging import get_logger
 from law_ai.services.agents import prompts
@@ -24,8 +25,8 @@ _INJECTION_MARKERS = (
 )
 
 
-def build_guardian(services: AgentServices) -> Callable[[GraphState], Awaitable[dict]]:
-    async def guardian(state: GraphState) -> dict:
+def build_guardian(services: AgentServices) -> Callable[[GraphState], Awaitable[dict[str, Any]]]:
+    async def guardian(state: GraphState) -> dict[str, Any]:
         question = state["question"]
 
         lowered = question.lower()

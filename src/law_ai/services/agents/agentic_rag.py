@@ -66,11 +66,15 @@ def _route_after_supervisor(state: GraphState) -> list[Send] | str:
 def build_agentic_rag(services: AgentServices, checkpointer: Any = None) -> Any:
     graph: StateGraph = StateGraph(GraphState)
 
-    graph.add_node("guardian", build_guardian(services))
-    graph.add_node("query_rewriter", build_query_rewriter(services))
-    graph.add_node("sub_agent", build_sub_agent(services))
-    graph.add_node("supervisor", build_supervisor(services))
-    graph.add_node("writer", build_writer(services))
+    # ignores below: mypy cannot bind our TypedDict states to langgraph's
+    # TypedDictLike protocol bound (pyright-only typing; verified still broken
+    # on mypy 2.3). Runtime-correct: nodes are async callables returning
+    # partial state dicts, exactly what add_node executes.
+    graph.add_node("guardian", build_guardian(services))  # type: ignore[call-overload]
+    graph.add_node("query_rewriter", build_query_rewriter(services))  # type: ignore[call-overload]
+    graph.add_node("sub_agent", build_sub_agent(services))  # type: ignore[call-overload]
+    graph.add_node("supervisor", build_supervisor(services))  # type: ignore[call-overload]
+    graph.add_node("writer", build_writer(services))  # type: ignore[call-overload]
 
     graph.add_edge(START, "guardian")
     graph.add_conditional_edges("guardian", _route_after_guardian, ["query_rewriter", END])

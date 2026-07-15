@@ -1,6 +1,7 @@
 """Writer — composes the grounded, cited final answer via the llm service."""
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from law_ai.logging import get_logger
 from law_ai.services.agents import prompts
@@ -11,8 +12,8 @@ from law_ai.services.agents.state import GraphState
 logger = get_logger(__name__)
 
 
-def build_writer(services: AgentServices) -> Callable[[GraphState], Awaitable[dict]]:
-    async def writer(state: GraphState) -> dict:
+def build_writer(services: AgentServices) -> Callable[[GraphState], Awaitable[dict[str, Any]]]:
+    async def writer(state: GraphState) -> dict[str, Any]:
         evidence_brief = (
             "\n\n".join(
                 f"Sub-question: {r.sub_question}\n"

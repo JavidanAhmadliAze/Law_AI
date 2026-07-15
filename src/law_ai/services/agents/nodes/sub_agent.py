@@ -6,6 +6,7 @@ raw passages never reach GraphState.
 """
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from law_ai.logging import get_logger
 from law_ai.services.agents.context import AgentServices
@@ -23,8 +24,10 @@ _TOP_K = 10  # wide window: retrieval alone must surface all decisive provisions
 _THINK_LOOP_ENABLED = False
 
 
-def build_sub_agent(services: AgentServices) -> Callable[[SubAgentInput], Awaitable[dict]]:
-    async def sub_agent(payload: SubAgentInput) -> dict:
+def build_sub_agent(
+    services: AgentServices,
+) -> Callable[[SubAgentInput], Awaitable[dict[str, Any]]]:
+    async def sub_agent(payload: SubAgentInput) -> dict[str, Any]:
         sub_question = payload["sub_question"]
         filters = {"article": payload["article_filter"]} if payload.get("article_filter") else None
 

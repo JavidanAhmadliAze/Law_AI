@@ -2,6 +2,7 @@
 (more sub-questions) or releases the answer to the writer."""
 
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from law_ai.logging import get_logger
 from law_ai.services.agents import prompts
@@ -14,8 +15,8 @@ logger = get_logger(__name__)
 MAX_ITERATIONS = 2
 
 
-def build_supervisor(services: AgentServices) -> Callable[[GraphState], Awaitable[dict]]:
-    async def supervisor(state: GraphState) -> dict:
+def build_supervisor(services: AgentServices) -> Callable[[GraphState], Awaitable[dict[str, Any]]]:
+    async def supervisor(state: GraphState) -> dict[str, Any]:
         iterations = state.get("iterations", 0) + 1
         results = state.get("sub_results", [])
 

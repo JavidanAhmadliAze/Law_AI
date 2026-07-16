@@ -1,15 +1,42 @@
 """Application settings.
 
-All service configuration is grouped into nested models and accumulated in a
-single `Settings` class, loaded once via `dependencies.get_settings()`
-(lru_cache). Env vars use "__" as the nesting delimiter, e.g. POSTGRES__HOST.
+Each settings block reads its own environment section via an env prefix
+(e.g. APP__, POSTGRES__) — all inherit the .env location and parsing rules
+from `BaseConfigSettings`. The root `Settings` aggregates them through
+`Field(default_factory=...)`, so every `Settings()` call re-reads the current
+environment (class-definition-time defaults would go stale). Loaded once per
+process via `dependencies.get_settings()` (lru_cache).
 """
 
-from pydantic import BaseModel
+from pathlib import Path
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# absolute path so .env is found regardless of the process's working
+# directory (config.py lives at src/law_ai/config.py → repo root is 2 up);
+# missing file (e.g. inside containers) is silently skipped — real env
+# variables still apply
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
-class AppSettings(BaseModel):
+
+class BaseConfigSettings(BaseSettings):
+    """Shared env-parsing rules; subclasses add their own `env_prefix`.
+
+    pydantic merges `model_config` across inheritance, so subclasses only
+    declare what differs (their prefix).
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=_ENV_FILE,
+        extra="ignore",
+        case_sensitive=False,
+    )
+
+
+class AppSettings(BaseConfigSettings):
+    model_config = SettingsConfigDict(env_prefix="APP__")
+
     env: str = "local"  # local | staging | prod
     debug: bool = False
     log_level: str = "INFO"
@@ -17,7 +44,9 @@ class AppSettings(BaseModel):
     access_token_expire_minutes: int = 1440
 
 
-class PostgresSettings(BaseModel):
+class PostgresSettings(BaseConfigSettings):
+    model_config = SettingsConfigDict(env_prefix="POSTGRES__")
+
     host: str = "localhost"
     port: int = 5432
     user: str = "lawai"
@@ -35,7 +64,9 @@ class PostgresSettings(BaseModel):
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
 
-class OpenSearchSettings(BaseModel):
+class OpenSearchSettings(BaseConfigSettings):
+    model_config = SettingsConfigDict(env_prefix="OPENSEARCH__")
+
     host: str = "localhost"
     port: int = 9200
     user: str = ""
@@ -45,8 +76,10 @@ class OpenSearchSettings(BaseModel):
     search_pipeline: str = "hybrid-rrf"
 
 
-class LLMSettings(BaseModel):
+class LLMSettings(BaseConfigSettings):
     """Provider and model are intentionally free-form — nothing is hardcoded."""
+
+    model_config = SettingsConfigDict(env_prefix="LLM__")
 
     provider: str = ""  # anthropic | bedrock | ...
     model: str = ""
@@ -55,7 +88,9 @@ class LLMSettings(BaseModel):
     temperature: float = 0.0
 
 
-class EmbeddingSettings(BaseModel):
+class EmbeddingSettings(BaseConfigSettings):
+    model_config = SettingsConfigDict(env_prefix="EMBEDDING__")
+
     model: str = ""
     provider: str = "local"  # local | api | bedrock
     api_url: str = ""
@@ -64,49 +99,59 @@ class EmbeddingSettings(BaseModel):
     timeout_seconds: float = 300.0  # generous: CPU inference on big batches is slow
 
 
-class RerankerSettings(BaseModel):
+class RerankerSettings(BaseConfigSettings):
+    model_config = SettingsConfigDict(env_prefix="RERANKER__")
+
     model: str = ""
     provider: str = "local"  # local | api | bedrock
     top_k: int = 5
 
 
-class TranslationSettings(BaseModel):
+class TranslationSettings(BaseConfigSettings):
+    model_config = SettingsConfigDict(env_prefix="TRANSLATION__")
+
     model: str = ""
     provider: str = "llm"  # glossary-only | model | llm
 
 
-class S3Settings(BaseModel):
+class S3Settings(BaseConfigSettings):
+    model_config = SettingsConfigDict(env_prefix="S3__")
+
     bucket: str = ""
     region: str = "eu-central-1"
     endpoint_url: str = ""  # set for minio/localstack
 
 
-class LangfuseSettings(BaseModel):
+class LangfuseSettings(BaseConfigSettings):
+    model_config = SettingsConfigDict(env_prefix="LANGFUSE__")
+
     public_key: str = ""
     secret_key: str = ""
     host: str = "https://cloud.langfuse.com"
     enabled: bool = False
 
 
-class FetcherSettings(BaseModel):
+class FetcherSettings(BaseConfigSettings):
+    model_config = SettingsConfigDict(env_prefix="FETCHER__")
+
     # act source URLs live in the registry (law_ai.acts), not in config
     data_dir: str = "data"
 
 
-class Settings(BaseSettings):
-    app: AppSettings = AppSettings()
-    postgres: PostgresSettings = PostgresSettings()
-    opensearch: OpenSearchSettings = OpenSearchSettings()
-    llm: LLMSettings = LLMSettings()
-    embedding: EmbeddingSettings = EmbeddingSettings()
-    reranker: RerankerSettings = RerankerSettings()
-    translation: TranslationSettings = TranslationSettings()
-    s3: S3Settings = S3Settings()
-    langfuse: LangfuseSettings = LangfuseSettings()
-    fetcher: FetcherSettings = FetcherSettings()
+class Settings(BaseConfigSettings):
+    """Aggregates all sections; env parsing rules inherited from the base.
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_nested_delimiter="__",
-        extra="ignore",
-    )
+    The root needs no env_prefix — its fields are whole sections, each
+    populated by its own factory reading its own prefixed variables.
+    """
+
+    app: AppSettings = Field(default_factory=AppSettings)
+    postgres: PostgresSettings = Field(default_factory=PostgresSettings)
+    opensearch: OpenSearchSettings = Field(default_factory=OpenSearchSettings)
+    llm: LLMSettings = Field(default_factory=LLMSettings)
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    reranker: RerankerSettings = Field(default_factory=RerankerSettings)
+    translation: TranslationSettings = Field(default_factory=TranslationSettings)
+    s3: S3Settings = Field(default_factory=S3Settings)
+    langfuse: LangfuseSettings = Field(default_factory=LangfuseSettings)
+    fetcher: FetcherSettings = Field(default_factory=FetcherSettings)

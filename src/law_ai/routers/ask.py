@@ -45,6 +45,17 @@ async def ask(
     if chat.title == "New chat":  # first question names the chat
         await chats.update(chat_id, {"title": payload.question[:_TITLE_LEN]})
 
+    # exact-match answer cache — only for history-free questions: a follow-up
+    # with identical text could legitimately deserve a context-aware answer
+    cache = getattr(request.app.state, "cache", None)
+    if cache is not None and not history:
+        cached = await cache.find_cached_response(payload)
+        if cached is not None:
+            await chats.add_message(chat_id, "assistant", cached.answer)
+            return AskResponse(
+                answer=cached.answer, citations=cached.citations, conversation_id=chat_id
+            )
+
     langfuse = getattr(request.app.state, "langfuse", None)
     handler = langfuse.callback_handler() if langfuse else None
     config: dict = {"configurable": {"thread_id": str(chat_id)}}
@@ -69,8 +80,12 @@ async def ask(
             root_span.update(output={"answer": final.answer, "citations": len(final.citations)})
 
     await chats.add_message(chat_id, "assistant", final.answer)
-    return AskResponse(
+    response = AskResponse(
         answer=final.answer,
         citations=[Citation(article=c.article, quote=c.quote) for c in final.citations],
         conversation_id=chat_id,
     )
+    if cache is not None and not history and final.citations:
+        # don't memoize refusals/empty answers — only grounded results
+        await cache.store_response(payload, response)
+    return response

@@ -138,6 +138,21 @@ class FetcherSettings(BaseConfigSettings):
     data_dir: str = "data"
 
 
+class RedisSettings(BaseConfigSettings):
+    """Exact-match RAG answer cache (services/cache)."""
+
+    model_config = SettingsConfigDict(env_prefix="REDIS__")
+
+    enabled: bool = True  # app degrades gracefully when Redis is unreachable
+    host: str = "localhost"
+    port: int = 6379
+    password: str = ""
+    db: int = 0
+    ttl_hours: int = 24
+    socket_timeout_seconds: float = 2.0
+    socket_connect_timeout_seconds: float = 2.0
+
+
 class Settings(BaseConfigSettings):
     """Aggregates all sections; env parsing rules inherited from the base.
 
@@ -155,3 +170,4 @@ class Settings(BaseConfigSettings):
     s3: S3Settings = Field(default_factory=S3Settings)
     langfuse: LangfuseSettings = Field(default_factory=LangfuseSettings)
     fetcher: FetcherSettings = Field(default_factory=FetcherSettings)
+    redis: RedisSettings = Field(default_factory=RedisSettings)

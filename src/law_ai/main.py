@@ -25,6 +25,11 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+
+    """Lifespan for RAG API: initialize database, services, agent graph; teardown in reverse."""
+
+    logger.info("Starting RAG API")
+
     settings = get_settings()
     setup_logging(settings)
     stack = AsyncExitStack()
@@ -33,6 +38,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     db = create_database(settings)
     await db.startup()
     app.state.db = db
+    logger.info("Database is connected")
+
+    # --- answer cache (optional — misses are just slower, never fatal) ----
+    app.state.cache = None
+    try:
+        from law_ai.services.cache.factory import create_cache_client
+
+        cache = create_cache_client(settings)
+        await cache.startup()
+        app.state.cache = cache
+    except Exception as exc:  # noqa: BLE001 — degraded boot is intentional
+        logger.warning("cache.disabled", reason=str(exc))
 
     # --- services → agent graph ------------------------------------------
     app.state.agentic_rag = None
@@ -75,6 +92,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("app.startup", env=settings.app.env)
     yield
 
+    if app.state.cache is not None:
+        await app.state.cache.teardown()
     if app.state.search is not None:
         await app.state.search.teardown()
     if app.state.langfuse is not None:

@@ -35,6 +35,7 @@ dependencies = [
     "langfuse>=2.50",
     "structlog>=24.1",
     "langchain-deepseek>=1.1.0",
+    "redis>=8.0.1",
 ]
 
 [dependency-groups]

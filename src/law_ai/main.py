@@ -25,7 +25,6 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-
     """Lifespan for RAG API: initialize database, services, agent graph; teardown in reverse."""
 
     logger.info("Starting RAG API")
@@ -83,7 +82,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.warning("checkpointer.unavailable", error=str(exc))
 
         app.state.agentic_rag = create_agent_graph(
-            llm=llm, search=search, translator=translator, checkpointer=checkpointer
+            llm=llm,
+            search=search,
+            translator=translator,
+            checkpointer=checkpointer,
         )
         logger.info("rag.ready")
     except (ValueError, Exception) as exc:  # noqa: BLE001 — degraded boot is intentional

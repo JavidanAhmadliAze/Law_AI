@@ -18,6 +18,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from statistics import mean
 from typing import Any
 
 from langfuse.experiment import Evaluation
@@ -59,6 +60,7 @@ def _evaluate(*, input: Any, output: Any, expected_output: Any, **kwargs: Any) -
     return [
         Evaluation(name="hit@5", value=metrics.hit_rate_at_k(retrieved, expected, _K)),
         Evaluation(name="recall@5", value=metrics.recall_at_k(retrieved, expected, _K)),
+        Evaluation(name="precision@5", value=metrics.precision_at_k(retrieved, expected, _K)),
         Evaluation(name="mrr", value=metrics.mrr(retrieved, expected)),
         Evaluation(name="ndcg@5", value=metrics.ndcg_at_k(retrieved, expected, _K)),
     ]
@@ -133,8 +135,45 @@ def main() -> None:
                 asyncio.run(services["search"].teardown())
         tracer.shutdown()
 
+    report = _write_report(result, run_name, config)
     print(f"run: {run_name} — {len(result.item_results)} items")
+    print(f"summary: {json.dumps(report['summary'], ensure_ascii=False)}")
+    print(f"report: {report['path']}")
     print("View: Langfuse UI → Datasets → civil-retrieval → Runs")
+
+
+def _write_report(result: Any, run_name: str, config: EvalConfig) -> dict[str, Any]:
+    """Aggregate per-item scores into a JSON report file next to run_eval's."""
+    per_item: list[dict[str, Any]] = []
+    for item_result in result.item_results:
+        scores = {e.name: e.value for e in (item_result.evaluations or [])}
+        item = item_result.item
+        question = item.input.get("question") if isinstance(item.input, dict) else str(item.input)
+        output = item_result.output or {}
+        per_item.append(
+            {
+                "question": question,
+                "translated_query": output.get("translated_query", ""),
+                "retrieved": output.get("retrieved", []),
+                "expected": (item.expected_output or {}).get("articles", []),
+                **scores,
+            }
+        )
+    score_names = sorted(
+        {k for row in per_item for k in row if k.startswith(("hit", "recall", "mrr", "ndcg"))}
+    )
+    summary = {
+        "run_name": run_name,
+        "items": len(per_item),
+        **{name: round(mean(row.get(name, 0.0) for row in per_item), 4) for name in score_names},
+    }
+    reports_dir = Path(config.reports_dir)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    path = reports_dir / f"langfuse-{run_name}.json"
+    path.write_text(
+        json.dumps({"summary": summary, "per_item": per_item}, indent=2, ensure_ascii=False)
+    )
+    return {"summary": summary, "path": str(path)}
 
 
 if __name__ == "__main__":

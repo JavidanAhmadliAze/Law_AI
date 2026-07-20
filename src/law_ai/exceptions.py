@@ -74,6 +74,13 @@ class GuardianBlockedError(LawAIError):
     detail = "Question was rejected"
 
 
+class RAGUnavailableError(LawAIError):
+    """Agent graph not built at boot (models unconfigured / a service down)."""
+
+    status_code = 503
+    detail = "RAG pipeline is not configured (set LLM__MODEL and EMBEDDING__MODEL)"
+
+
 def register_exception_handlers(app: "FastAPI") -> None:
     from fastapi import Request
     from fastapi.responses import JSONResponse

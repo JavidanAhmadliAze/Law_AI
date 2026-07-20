@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Law-AI — Retrieval Evaluation</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
+    --series:#2a78d6; --good:#0ca30c; --good-text:#006300; --critical:#d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+      --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,.10);
+      --series:#3987e5; --good:#0ca30c; --good-text:#0ca30c; --critical:#d03b3b;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,.10);
+    --series:#3987e5; --good:#0ca30c; --good-text:#0ca30c; --critical:#d03b3b;
+  }
+  * { box-sizing:border-box; margin:0; }
+  body {
+    background:var(--page); color:var(--ink);
+    font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
+    padding:24px; max-width:1100px; margin:0 auto;
+  }
+  header { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:20px; }
+  h1 { font-size:20px; font-weight:650; }
+  h2 { font-size:14px; font-weight:600; color:var(--ink-2); margin:28px 0 10px; }
+  .meta { color:var(--muted); font-size:12px; }
+  button.theme { background:var(--surface); color:var(--ink-2); border:1px solid var(--border); border-radius:8px; padding:4px 12px; cursor:pointer; font:inherit; font-size:12px; }
+
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  .tile { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
+  .tile .label { font-size:12px; color:var(--muted); }
+  .tile .value { font-size:28px; font-weight:650; margin-top:2px; }
+  .tile .sub { font-size:11px; color:var(--ink-2); }
+
+  .panel { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; overflow-x:auto; }
+
+  .bar-row { display:grid; grid-template-columns:220px 1fr 56px; align-items:center; gap:10px; padding:6px 0; }
+  .bar-row .name { color:var(--ink-2); font-size:13px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .bar-track { position:relative; height:20px; background:transparent; border-left:2px solid var(--baseline); }
+  .bar-track .gridline { position:absolute; top:0; bottom:0; width:1px; background:var(--grid); }
+  .bar { position:absolute; top:0; height:20px; background:var(--series); border-radius:0 4px 4px 0; min-width:2px; }
+  .bar-row .val { font-variant-numeric:tabular-nums; color:var(--ink-2); font-size:13px; }
+  .bar-hit { position:absolute; top:-4px; bottom:-4px; left:0; right:0; cursor:default; }
+
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th { text-align:left; color:var(--muted); font-weight:500; font-size:12px; border-bottom:1px solid var(--baseline); padding:6px 10px 6px 0; }
+  td { border-bottom:1px solid var(--grid); padding:7px 10px 7px 0; vertical-align:top; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  tr:last-child td { border-bottom:none; }
+  .chip { display:inline-block; font-size:11px; font-weight:600; border-radius:6px; padding:1px 8px; white-space:nowrap; }
+  .chip.hit { color:var(--good-text); background:color-mix(in srgb, var(--good) 12%, transparent); }
+  .chip.miss { color:var(--critical); background:color-mix(in srgb, var(--critical) 12%, transparent); }
+  .arts { color:var(--ink-2); font-size:12px; }
+  .arts b { color:var(--ink); font-weight:600; }
+  .q { max-width:420px; }
+
+  .filters { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+  .filters button { background:var(--surface); border:1px solid var(--border); color:var(--ink-2); border-radius:8px; padding:4px 12px; cursor:pointer; font:inherit; font-size:12px; }
+  .filters button[aria-pressed="true"] { color:var(--ink); border-color:var(--series); box-shadow:inset 0 0 0 1px var(--series); }
+  .filters input { flex:1; min-width:180px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:4px 10px; color:var(--ink); font:inherit; font-size:13px; }
+
+  #tooltip { position:fixed; pointer-events:none; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:12px; color:var(--ink); box-shadow:0 4px 14px rgba(0,0,0,.15); display:none; z-index:10; max-width:320px; }
+  #tooltip .t { font-weight:600; margin-bottom:2px; }
+  #tooltip .r { color:var(--ink-2); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Law-AI — Retrieval Evaluation</h1>
+    <div class="meta" id="meta"></div>
+  </div>
+  <button class="theme" id="themeBtn" type="button">◐ theme</button>
+</header>
+
+<section class="tiles" id="tiles"></section>
+
+<h2>Hit@5 by act — latest run</h2>
+<div class="panel" id="acts"></div>
+
+<h2>Run history</h2>
+<div class="panel"><table id="history"></table></div>
+
+<h2>Questions — latest run</h2>
+<div class="filters">
+  <button data-f="all" aria-pressed="true" type="button">All</button>
+  <button data-f="miss" aria-pressed="false" type="button">Misses</button>
+  <button data-f="hit" aria-pressed="false" type="button">Hits</button>
+  <input id="search" type="search" placeholder="Search question or article…">
+</div>
+<div class="panel"><table id="rows"></table></div>
+
+<div id="tooltip"></div>
+
+<script id="data" type="application/json">/*__DATA__*/null</script>
+<script>
+const D = JSON.parse(document.getElementById('data').textContent);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = v => (v == null ? '—' : Number(v).toFixed(3));
+
+document.getElementById('meta').textContent =
+  `${D.latest.name} · ${D.latest.n} questions · generated ${D.generated}`;
+
+/* theme toggle — data-theme stamp wins over OS setting in both directions */
+const btn = document.getElementById('themeBtn');
+btn.onclick = () => {
+  const cur = document.documentElement.dataset.theme;
+  const osDark = matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.dataset.theme =
+    cur ? (cur === 'dark' ? 'light' : 'dark') : (osDark ? 'light' : 'dark');
+};
+
+/* stat tiles */
+const tileDefs = [['hit@5','Hit@5'],['recall@5','Recall@5'],['precision@5','Precision@5'],['mrr','MRR'],['ndcg@5','nDCG@5']];
+document.getElementById('tiles').innerHTML = tileDefs
+  .filter(([k]) => D.latest.metrics[k] != null)
+  .map(([k, label]) => `<div class="tile"><div class="label">${label}</div>
+     <div class="value">${fmt(D.latest.metrics[k])}</div>
+     <div class="sub">n=${D.latest.n}</div></div>`).join('');
+
+/* per-act bars — single series (magnitude), direct value labels, hover tooltip */
+const tip = document.getElementById('tooltip');
+const showTip = (e, html) => { tip.innerHTML = html; tip.style.display = 'block'; moveTip(e); };
+const moveTip = e => {
+  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.min(e.clientX + pad, innerWidth - w - 8) + 'px';
+  tip.style.top  = Math.min(e.clientY + pad, innerHeight - h - 8) + 'px';
+};
+const hideTip = () => tip.style.display = 'none';
+
+document.getElementById('acts').innerHTML = D.acts.map(a => `
+  <div class="bar-row">
+    <div class="name">${esc(a.act)}</div>
+    <div class="bar-track">
+      ${[25,50,75,100].map(p => `<div class="gridline" style="left:${p}%"></div>`).join('')}
+      <div class="bar" style="width:${(a.hit5*100).toFixed(1)}%"></div>
+      <div class="bar-hit" data-tt="<div class='t'>${esc(a.act)}</div><div class='r'>hit@5 ${fmt(a.hit5)} · MRR ${fmt(a.mrr)} · n=${a.n}</div>"></div>
+    </div>
+    <div class="val">${fmt(a.hit5)}</div>
+  </div>`).join('');
+
+document.querySelectorAll('.bar-hit').forEach(el => {
+  el.addEventListener('mousemove', e => showTip(e, el.dataset.tt));
+  el.addEventListener('mouseleave', hideTip);
+});
+
+/* run history table */
+document.getElementById('history').innerHTML = `
+  <tr><th>Run</th><th>Date</th><th class="num">n</th>
+      ${tileDefs.map(([,l]) => `<th class="num">${l}</th>`).join('')}</tr>` +
+  D.history.slice().reverse().map(r => `
+  <tr><td>${esc(r.name)}</td><td class="meta">${esc(r.date)}</td><td class="num">${r.n}</td>
+      ${tileDefs.map(([k]) => `<td class="num">${fmt(r.metrics[k])}</td>`).join('')}</tr>`).join('');
+
+/* question table with filters */
+let filter = 'all';
+const searchBox = document.getElementById('search');
+const isHit = r => (r['hit@5'] ?? 0) > 0;
+
+function renderRows() {
+  const q = searchBox.value.toLowerCase();
+  const rows = D.latest.rows.filter(r => {
+    if (filter === 'miss' && isHit(r)) return false;
+    if (filter === 'hit' && !isHit(r)) return false;
+    if (!q) return true;
+    const hay = (r.question + ' ' + (r.expected||[]).join(' ') + ' ' + (r.retrieved||[]).join(' ')).toLowerCase();
+    return hay.includes(q);
+  });
+  document.getElementById('rows').innerHTML = `
+    <tr><th>Question</th><th>Expected</th><th>Retrieved (top 5)</th>
+        <th>Result</th><th class="num">MRR</th></tr>` +
+    rows.map(r => `
+    <tr>
+      <td class="q">${esc(r.question)}</td>
+      <td class="arts">${(r.expected||[]).map(a => `<b>${esc(a.split(':').pop())}</b> <span class="meta">${esc(a.split(':')[0])}</span>`).join('<br>')}</td>
+      <td class="arts">${(r.retrieved||[]).map(a => {
+        const hit = (r.expected||[]).includes(a);
+        const [act, art] = [a.split(':')[0], a.split(':').pop()];
+        const expActs = new Set((r.expected||[]).map(x => x.split(':')[0]));
+        const abbr = {'kodeks-cywilny':'KC','ochrona-praw-lokatorow':'OPL','wlasnosc-lokali':'WL','ksiegi-wieczyste-hipoteka':'KWiH'}[act] || act;
+        const label = expActs.has(act) ? art : `${art} <span class="meta">${abbr}</span>`;
+        return hit ? `<b>${label}</b>` : label;
+      }).join(', ')}</td>
+      <td>${isHit(r) ? '<span class="chip hit">✓ hit</span>' : '<span class="chip miss">✗ miss</span>'}</td>
+      <td class="num">${fmt(r.mrr)}</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="meta">no rows match</td></tr>';
+}
+document.querySelectorAll('.filters button').forEach(b => b.onclick = () => {
+  filter = b.dataset.f;
+  document.querySelectorAll('.filters button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  renderRows();
+});
+searchBox.addEventListener('input', renderRows);
+renderRows();
+</script>
+</body>
+</html>

@@ -70,6 +70,9 @@ eval-retrieval:     ## Deterministic, cheap — run often
 eval-generation:    ## LLM-as-judge — costs tokens, run on PRs/releases
 	uv run python -m evaluation.runners.run_eval --mode generation
 
+eval-ui:            ## Render evaluation reports into reports/eval_dashboard.html
+	uv run python -m evaluation.report_ui
+
 # ---------------------------------------------------------------- misc ----
 
 clean:

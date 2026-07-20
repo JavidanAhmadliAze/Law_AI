@@ -3,10 +3,16 @@
 import uuid
 from contextlib import nullcontext
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 
-from law_ai.dependencies import ConversationRepoDep, CurrentUserDep
-from law_ai.exceptions import LawAIError, NotFoundError
+from law_ai.dependencies import (
+    AgentGraphDep,
+    CacheDep,
+    ConversationRepoDep,
+    CurrentUserDep,
+    LangfuseDep,
+)
+from law_ai.exceptions import NotFoundError
 from law_ai.schemas.chat import AskRequest, AskResponse, Citation
 from law_ai.services.agents.schemas import FinalAnswer
 
@@ -16,23 +22,16 @@ _HISTORY_TURNS = 6
 _TITLE_LEN = 60
 
 
-class RAGUnavailableError(LawAIError):
-    status_code = 503
-    detail = "RAG pipeline is not configured (set LLM__MODEL and EMBEDDING__MODEL)"
-
-
 @router.post("/{chat_id}/ask", response_model=AskResponse)
 async def ask(
     chat_id: uuid.UUID,
     payload: AskRequest,
     user: CurrentUserDep,
     chats: ConversationRepoDep,
-    request: Request,
+    graph: AgentGraphDep,
+    cache: CacheDep,
+    langfuse: LangfuseDep,
 ) -> AskResponse:
-    graph = getattr(request.app.state, "agentic_rag", None)
-    if graph is None:
-        raise RAGUnavailableError()
-
     chat = await chats.get(chat_id)
     if chat is None or chat.user_id != user.id:
         raise NotFoundError("Chat not found")
@@ -47,7 +46,6 @@ async def ask(
 
     # exact-match answer cache — only for history-free questions: a follow-up
     # with identical text could legitimately deserve a context-aware answer
-    cache = getattr(request.app.state, "cache", None)
     if cache is not None and not history:
         cached = await cache.find_cached_response(payload)
         if cached is not None:
@@ -56,7 +54,6 @@ async def ask(
                 answer=cached.answer, citations=cached.citations, conversation_id=chat_id
             )
 
-    langfuse = getattr(request.app.state, "langfuse", None)
     handler = langfuse.callback_handler() if langfuse else None
     config: dict = {"configurable": {"thread_id": str(chat_id)}}
     if handler is not None:

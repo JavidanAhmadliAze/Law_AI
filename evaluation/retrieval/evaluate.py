@@ -83,6 +83,10 @@ async def evaluate_retrieval(config: EvalConfig) -> dict[str, Any]:
                         for k in config.k_values
                     },
                     **{
+                        f"precision@{k}": metrics.precision_at_k(retrieved, expected, k)
+                        for k in config.k_values
+                    },
+                    **{
                         f"ndcg@{k}": metrics.ndcg_at_k(retrieved, expected, k)
                         for k in config.k_values
                     },

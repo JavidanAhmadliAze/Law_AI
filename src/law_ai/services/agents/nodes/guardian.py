@@ -4,12 +4,13 @@ Emits a typed GuardianVerdict; when blocked it also writes the final_answer
 so the graph can end immediately with a polite refusal.
 """
 
-from collections.abc import Awaitable, Callable
 from typing import Any
+
+from langchain_core.runnables import RunnableConfig
 
 from law_ai.logging import get_logger
 from law_ai.services.agents import prompts
-from law_ai.services.agents.context import AgentServices
+from law_ai.services.agents.context import services_from_config
 from law_ai.services.agents.schemas import FinalAnswer, GuardianVerdict
 from law_ai.services.agents.state import GraphState
 
@@ -25,32 +26,30 @@ _INJECTION_MARKERS = (
 )
 
 
-def build_guardian(services: AgentServices) -> Callable[[GraphState], Awaitable[dict[str, Any]]]:
-    async def guardian(state: GraphState) -> dict[str, Any]:
-        question = state["question"]
+async def guardian(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
+    question = state["question"]
 
-        lowered = question.lower()
-        if any(marker in lowered for marker in _INJECTION_MARKERS):
-            verdict = GuardianVerdict(
-                allowed=False,
-                reason="injection",
-                message="I can only answer questions about the Polish Constitution.",
-            )
-        else:
-            history = _render_history(state.get("history", []))
-            verdict = await services.llm.generate_structured(
-                prompts.GUARDIAN,
-                f"Conversation so far:\n{history}\n\nUser message:\n{question}",
-                GuardianVerdict,
-            )
+    lowered = question.lower()
+    if any(marker in lowered for marker in _INJECTION_MARKERS):
+        verdict = GuardianVerdict(
+            allowed=False,
+            reason="injection",
+            message="I can only answer questions about Polish law.",
+        )
+    else:
+        services = services_from_config(config)
+        history = _render_history(state.get("history", []))
+        verdict = await services.llm.generate_structured(
+            prompts.GUARDIAN,
+            f"Conversation so far:\n{history}\n\nUser message:\n{question}",
+            GuardianVerdict,
+        )
 
-        update: dict = {"guardian_verdict": verdict}
-        if not verdict.allowed:
-            logger.warning("guardian.blocked", reason=verdict.reason)
-            update["final_answer"] = FinalAnswer(answer=verdict.message, citations=[])
-        return update
-
-    return guardian
+    update: dict = {"guardian_verdict": verdict}
+    if not verdict.allowed:
+        logger.warning("guardian.blocked", reason=verdict.reason)
+        update["final_answer"] = FinalAnswer(answer=verdict.message, citations=[])
+    return update
 
 
 def _render_history(history: list[dict[str, str]]) -> str:

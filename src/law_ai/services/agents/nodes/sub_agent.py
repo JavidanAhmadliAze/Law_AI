@@ -5,11 +5,12 @@ optionally one refined retrieval round. Returns compact evidence only;
 raw passages never reach GraphState.
 """
 
-from collections.abc import Awaitable, Callable
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
+
 from law_ai.logging import get_logger
-from law_ai.services.agents.context import AgentServices
+from law_ai.services.agents.context import services_from_config
 from law_ai.services.agents.schemas import SubAgentResult
 from law_ai.services.agents.state import SubAgentInput
 from law_ai.services.agents.tools import compress_tool, think_tool
@@ -24,50 +25,46 @@ _TOP_K = 10  # wide window: retrieval alone must surface all decisive provisions
 _THINK_LOOP_ENABLED = False
 
 
-def build_sub_agent(
-    services: AgentServices,
-) -> Callable[[SubAgentInput], Awaitable[dict[str, Any]]]:
-    async def sub_agent(payload: SubAgentInput) -> dict[str, Any]:
-        sub_question = payload["sub_question"]
-        filters = {"article": payload["article_filter"]} if payload.get("article_filter") else None
+async def sub_agent(payload: SubAgentInput, config: RunnableConfig) -> dict[str, Any]:
+    services = services_from_config(config)
+    sub_question = payload["sub_question"]
+    filters = {"article": payload["article_filter"]} if payload.get("article_filter") else None
 
-        # the corpus is Polish — translate the retrieval query when needed
-        if payload.get("query_language") == "en":
-            retrieval_query = await services.translator.translate(sub_question, Direction.EN_TO_PL)
-        else:
-            retrieval_query = sub_question
+    # the corpus is Polish — translate the retrieval query when needed
+    if payload.get("query_language") == "en":
+        retrieval_query = await services.translator.translate(sub_question, Direction.EN_TO_PL)
+    else:
+        retrieval_query = sub_question
 
-        chunks = await services.search.retrieve(retrieval_query, top_k=_TOP_K, filters=filters)
-        evidence = await compress_tool(services.llm, question=sub_question, chunks=chunks)
+    chunks = await services.search.retrieve(retrieval_query, top_k=_TOP_K, filters=filters)
+    evidence = await compress_tool(services.llm, question=sub_question, chunks=chunks)
 
-        sufficient = True  # without the think loop, trust the wide retrieval window
-        if _THINK_LOOP_ENABLED:
+    sufficient = True  # without the think loop, trust the wide retrieval window
+    if _THINK_LOOP_ENABLED:
+        thought = await think_tool(services.llm, question=sub_question, evidence=evidence)
+        if not thought.sufficient and thought.refined_query:
+            # one autonomous retry with the refined Polish query
+            more_chunks = await services.search.retrieve(
+                thought.refined_query, top_k=_TOP_K, filters=None
+            )
+            seen = {item.quote for item in evidence}
+            extra = await compress_tool(services.llm, question=sub_question, chunks=more_chunks)
+            evidence.extend(item for item in extra if item.quote not in seen)
             thought = await think_tool(services.llm, question=sub_question, evidence=evidence)
-            if not thought.sufficient and thought.refined_query:
-                # one autonomous retry with the refined Polish query
-                more_chunks = await services.search.retrieve(
-                    thought.refined_query, top_k=_TOP_K, filters=None
-                )
-                seen = {item.quote for item in evidence}
-                extra = await compress_tool(services.llm, question=sub_question, chunks=more_chunks)
-                evidence.extend(item for item in extra if item.quote not in seen)
-                thought = await think_tool(services.llm, question=sub_question, evidence=evidence)
-            sufficient = thought.sufficient
+        sufficient = thought.sufficient
 
-        logger.info(
-            "sub_agent.done",
-            sub_question=sub_question[:60],
-            evidence=len(evidence),
-            sufficient=sufficient,
-        )
-        return {
-            "sub_results": [
-                SubAgentResult(
-                    sub_question=sub_question,
-                    evidence=evidence,
-                    sufficient=sufficient,
-                )
-            ]
-        }
-
-    return sub_agent
+    logger.info(
+        "sub_agent.done",
+        sub_question=sub_question[:60],
+        evidence=len(evidence),
+        sufficient=sufficient,
+    )
+    return {
+        "sub_results": [
+            SubAgentResult(
+                sub_question=sub_question,
+                evidence=evidence,
+                sufficient=sufficient,
+            )
+        ]
+    }

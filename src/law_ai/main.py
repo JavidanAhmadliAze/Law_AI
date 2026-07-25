@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
             checkpointer = await stack.enter_async_context(
-                AsyncPostgresSaver.from_conn_string(settings.postgres.sync_dsn)
+                AsyncPostgresSaver.from_conn_string(settings.postgres.standard_dsn)
             )
             await checkpointer.setup()
         except Exception as exc:  # graph still works, just without thread memory

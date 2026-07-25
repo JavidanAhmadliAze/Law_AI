@@ -59,7 +59,7 @@ class PostgresSettings(BaseConfigSettings):
         return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
     @property
-    def sync_dsn(self) -> str:
+    def standard_dsn(self) -> str:
         """Used by Alembic and the LangGraph checkpointer setup."""
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 

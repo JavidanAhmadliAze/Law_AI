@@ -55,6 +55,81 @@ ACTS: list[LegalAct] = [
         url="https://isap.sejm.gov.pl/isap.nsf/download.xsp/WDU19820190147/U/D19820147Lj.pdf",
         effective_date="1983-01-01",
     ),
+    # ---------------------------------------------------------- business ----
+    LegalAct(
+        act_id="kodeks-spolek-handlowych",
+        name="Kodeks spółek handlowych",
+        domain="business",
+        url="https://isap.sejm.gov.pl/isap.nsf/download.xsp/WDU20000941037/U/D20001037Lj.pdf",
+        effective_date="2001-01-01",
+    ),
+    LegalAct(
+        act_id="prawo-przedsiebiorcow",
+        name="Prawo przedsiębiorców",
+        domain="business",
+        url="https://isap.sejm.gov.pl/isap.nsf/download.xsp/WDU20180000646/U/D20180646Lj.pdf",
+        effective_date="2018-04-30",
+    ),
+    LegalAct(
+        act_id="przedsiebiorcy-zagraniczni",
+        name="Ustawa o zasadach uczestnictwa przedsiębiorców zagranicznych i innych osób "
+        "zagranicznych w obrocie gospodarczym na terytorium RP",
+        domain="business",
+        url="https://isap.sejm.gov.pl/isap.nsf/download.xsp/WDU20180000649/U/D20180649Lj.pdf",
+        effective_date="2018-04-30",
+    ),
+    LegalAct(
+        act_id="krajowy-rejestr-sadowy",
+        name="Ustawa o Krajowym Rejestrze Sądowym",
+        domain="business",
+        url="https://isap.sejm.gov.pl/isap.nsf/download.xsp/WDU19971210769/U/D19970769Lj.pdf",
+        effective_date="2001-01-01",
+    ),
+    LegalAct(
+        act_id="ceidg",
+        name="Ustawa o Centralnej Ewidencji i Informacji o Działalności Gospodarczej "
+        "i Punkcie Informacji dla Przedsiębiorcy",
+        domain="business",
+        url="https://isap.sejm.gov.pl/isap.nsf/download.xsp/WDU20180000647/U/D20180647Lj.pdf",
+        effective_date="2018-04-30",
+    ),
+    LegalAct(
+        act_id="rachunkowosc",
+        name="Ustawa o rachunkowości",
+        domain="business",
+        url="https://isap.sejm.gov.pl/isap.nsf/download.xsp/WDU19941210591/U/D19940591Lj.pdf",
+        effective_date="1995-01-01",
+    ),
+    LegalAct(
+        act_id="nieuczciwa-konkurencja",
+        name="Ustawa o zwalczaniu nieuczciwej konkurencji",
+        domain="business",
+        url="https://isap.sejm.gov.pl/isap.nsf/download.xsp/WDU19930470211/U/D19930211Lj.pdf",
+        effective_date="1993-08-16",
+    ),
+    # -------------------------------------------------------- employment ----
+    LegalAct(
+        act_id="kodeks-pracy",
+        name="Kodeks pracy",
+        domain="employment",
+        url="https://isap.sejm.gov.pl/isap.nsf/download.xsp/WDU19740240141/U/D19740141Lj.pdf",
+        effective_date="1975-01-01",
+    ),
+    LegalAct(
+        act_id="ubezpieczenia-spoleczne",
+        name="Ustawa o systemie ubezpieczeń społecznych",
+        domain="employment",
+        url="https://isap.sejm.gov.pl/isap.nsf/download.xsp/WDU19981370887/U/D19980887Lj.pdf",
+        effective_date="1999-01-01",
+    ),
+    # --------------------------------------------------------------- tax ----
+    LegalAct(
+        act_id="vat",
+        name="Ustawa o podatku od towarów i usług (VAT)",
+        domain="tax",
+        url="https://isap.sejm.gov.pl/isap.nsf/download.xsp/WDU20040540535/U/D20040535Lj.pdf",
+        effective_date="2004-05-01",
+    ),
 ]
 
 

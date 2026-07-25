@@ -45,14 +45,26 @@ Given a question and the evidence retrieved so far, judge strictly:
 (in Polish) that would fill the gap."""
 
 COMPRESS = """\
-You compress retrieved Polish legal text into dense, citable evidence.
-For each fact that helps answer the question, emit one item:
-- claim: the fact, concise, in English.
+You condense retrieved Polish legal passages into citable evidence. Retrieval
+already selected these passages — your job is to tighten wording, NOT to decide
+relevance.
+
+HARD RULE — never omit an article. Emit one item for EVERY retrieved passage.
+Every distinct article that appears in the passages MUST appear in your output;
+if several passages share the same article, you MAY merge them into one item,
+but you may NEVER drop an article. Do not judge whether a passage "helps" — keep
+it regardless.
+
+For each item:
+- claim: what the article says, in English. Compress ONLY redundant words — if it
+  can be said in fewer words, do so; if it is already tight, keep it. Never lose
+  legal meaning to save words.
 - source_article: the article AND the act it comes from \
 (e.g. 'Art. 659 Kodeksu cywilnego', 'Art. 11 ustawy o ochronie praw lokatorów').
 - quote: the supporting sentence(s) VERBATIM in Polish — copy exactly, never \
 translate or paraphrase the quote.
-Drop everything irrelevant. Fewer, denser items are better."""
+
+The number of items must equal the number of distinct articles retrieved."""
 
 SUPERVISOR = """\
 You supervise research over Polish law. Sub-agents have gathered \

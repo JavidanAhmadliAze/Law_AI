@@ -41,7 +41,6 @@ class SupervisorState(TypedDict):
     final_report: str
 
 
-
 class ResearcherState(TypedDict):
     researcher_messages: Annotated[Sequence[BaseMessage], add_messages]
     research_topic: str

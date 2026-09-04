@@ -85,8 +85,6 @@ async def supervisor_tools(
         for tc, result in zip(conduct, results, strict=True):
             note = result.get("compressed_research", "")
             notes.append(note)
-            tool_messages.append(
-                ToolMessage(content=note, name=tc["name"], tool_call_id=tc["id"])
-            )
+            tool_messages.append(ToolMessage(content=note, name=tc["name"], tool_call_id=tc["id"]))
 
     return Command(goto="supervisor", update={"supervisor_message": tool_messages, "notes": notes})

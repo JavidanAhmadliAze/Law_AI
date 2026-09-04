@@ -30,8 +30,16 @@ class AgentOutputState(MessagesState):
     final_report: str
 
 
-class SupervisorState(AgentOutputState):
+class SupervisorState(TypedDict):
+    # shared with the parent AgentOutputState (same names + reducers) so they
+    # cross the subgraph boundary: supervisor_message in, notes out
+    rewritten_query: str
+    supervisor_message: Annotated[Sequence[BaseMessage], add_messages]
+    notes: Annotated[list[str], operator.add]
+    # private to the supervisor loop — not shared with the parent
     research_iterations: int
+    final_report: str
+
 
 
 class ResearcherState(TypedDict):

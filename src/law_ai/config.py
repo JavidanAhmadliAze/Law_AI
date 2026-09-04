@@ -86,13 +86,17 @@ class LLMSettings(BaseConfigSettings):
     api_key: str = ""
     base_url: str = ""
     temperature: float = 0.0
+    # how with_structured_output coerces output. "function_calling" (default,
+    # most providers) uses tool_choice; DeepSeek v4 "thinking" models reject
+    # tool_choice → set "json_mode" (a JSON schema hint is injected into the prompt).
+    structured_method: str = "function_calling"
 
 
 class EmbeddingSettings(BaseConfigSettings):
     model_config = SettingsConfigDict(env_prefix="EMBEDDING__")
 
     model: str = ""
-    provider: str = "local"  # local | api | bedrock
+    provider: str = "local"  # local | api
     api_url: str = ""
     dimension: int = 1024
     batch_size: int = 32  # texts per embed request (TEI rejects oversized batches)
@@ -102,9 +106,18 @@ class EmbeddingSettings(BaseConfigSettings):
 class RerankerSettings(BaseConfigSettings):
     model_config = SettingsConfigDict(env_prefix="RERANKER__")
 
-    model: str = ""
-    provider: str = "local"  # local | api | bedrock
+    model: str = ""  # in-process CrossEncoder; empty disables reranking (RRF-only)
     top_k: int = 5
+
+
+class AgentSettings(BaseConfigSettings):
+    """Tunables for the agentic graph — never hardcoded in the nodes."""
+
+    model_config = SettingsConfigDict(env_prefix="AGENT__")
+
+    max_research_iterations: int = 3  # supervisor loop cap
+    researcher_max_tool_calls: int = 5  # retrieve/think turns per research sub-agent
+    retriever_top_k: int = 5  # passages the retrieve tool returns
 
 
 class TranslationSettings(BaseConfigSettings):
@@ -166,6 +179,7 @@ class Settings(BaseConfigSettings):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     reranker: RerankerSettings = Field(default_factory=RerankerSettings)
+    agent: AgentSettings = Field(default_factory=AgentSettings)
     translation: TranslationSettings = Field(default_factory=TranslationSettings)
     s3: S3Settings = Field(default_factory=S3Settings)
     langfuse: LangfuseSettings = Field(default_factory=LangfuseSettings)

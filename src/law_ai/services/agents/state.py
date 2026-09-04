@@ -1,46 +1,40 @@
-"""GraphState — the shared blackboard carrying the conversation between agents.
+"""Graph states.
 
-Parallel sub_agents merge into `sub_results` via an additive reducer so
-concurrent writes never clobber each other.
+- AgentInputState  — what the router hands the graph (just messages).
+- AgentOutputState — the general graph's working/output state.
+- SupervisorState  — the supervisor subgraph (adds its private loop counter).
+- ResearcherState  — the research subgraph (invoked per topic by the supervisor).
+
+`supervisor_message` and `researcher_messages` use the add_messages reducer so
+appends merge correctly; `notes` uses an additive reducer so parallel research
+results concatenate instead of clobbering.
 """
 
 import operator
+from collections.abc import Sequence
 from typing import Annotated, TypedDict
 
-from law_ai.services.agents.schemas import (
-    FinalAnswer,
-    GuardianVerdict,
-    SubAgentResult,
-)
+from langchain_core.messages import BaseMessage
+from langgraph.graph import MessagesState
+from langgraph.graph.message import add_messages
 
 
-class GraphState(TypedDict, total=False):
-    # input
-    question: str
-    history: list[dict[str, str]]  # prior turns [{role, content}]
-
-    # guardian
-    guardian_verdict: GuardianVerdict
-
-    # query rewriting / routing
-    sub_questions: list[str]
-    article_filter: str
-    query_language: str  # 'en' | 'pl'
-
-    # sub-agent fan-out (additive reducer — parallel-safe)
-    sub_results: Annotated[list[SubAgentResult], operator.add]
-
-    # supervisor loop
-    iterations: int
-    additional_questions: list[str]
-
-    # output
-    final_answer: FinalAnswer
+class AgentInputState(MessagesState):
+    pass
 
 
-class SubAgentInput(TypedDict):
-    """Payload each Send() hands to one sub_agent."""
+class AgentOutputState(MessagesState):
+    rewritten_query: str
+    supervisor_message: Annotated[Sequence[BaseMessage], add_messages]
+    notes: Annotated[list[str], operator.add]
+    final_report: str
 
-    sub_question: str
-    article_filter: str
-    query_language: str
+
+class SupervisorState(AgentOutputState):
+    research_iterations: int
+
+
+class ResearcherState(TypedDict):
+    researcher_messages: Annotated[Sequence[BaseMessage], add_messages]
+    research_topic: str
+    compressed_research: str

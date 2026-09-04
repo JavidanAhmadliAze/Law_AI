@@ -1,58 +1,35 @@
-"""Guardian — entry gate: security first, then relevance.
+"""Guardian — the entry gate. Deterministic: one structured LLM call.
 
-Emits a typed GuardianVerdict; when blocked it also writes the final_answer
-so the graph can end immediately with a polite refusal.
+Routes with a Command: on to query_rewriter when allowed, straight to END with a
+refusal message when not (no verdict field needed in the state).
 """
 
-from typing import Any
+from typing import Any, Literal
 
+from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.graph import END
+from langgraph.types import Command
 
-from law_ai.logging import get_logger
-from law_ai.services.agents import prompts
-from law_ai.services.agents.context import services_from_config
-from law_ai.services.agents.schemas import FinalAnswer, GuardianVerdict
-from law_ai.services.agents.state import GraphState
-
-logger = get_logger(__name__)
-
-# fast deterministic pre-filter for blatant injection attempts
-_INJECTION_MARKERS = (
-    "ignore previous instructions",
-    "ignore all instructions",
-    "system prompt",
-    "you are now",
-    "developer mode",
-)
+from law_ai.services.agents import prompt
+from law_ai.services.agents.context import last_human, services_from_config
+from law_ai.services.agents.schema import GuardianVerdict
+from law_ai.services.agents.state import AgentOutputState
 
 
-async def guardian(state: GraphState, config: RunnableConfig) -> dict[str, Any]:
-    question = state["question"]
-
-    lowered = question.lower()
-    if any(marker in lowered for marker in _INJECTION_MARKERS):
-        verdict = GuardianVerdict(
-            allowed=False,
-            reason="injection",
-            message="I can only answer questions about Polish law.",
-        )
-    else:
-        services = services_from_config(config)
-        history = _render_history(state.get("history", []))
-        verdict = await services.llm.generate_structured(
-            prompts.GUARDIAN,
-            f"Conversation so far:\n{history}\n\nUser message:\n{question}",
-            GuardianVerdict,
-        )
-
-    update: dict = {"guardian_verdict": verdict}
+async def guardian(
+    state: AgentOutputState, config: RunnableConfig
+) -> Command[Literal["query_rewriter", "__end__"]]:
+    services = services_from_config(config)
+    question = last_human(list(state["messages"]))
+    verdict: GuardianVerdict = await services.llm.generate_structured(
+        prompt.GUARDIAN, question, GuardianVerdict
+    )
     if not verdict.allowed:
-        logger.warning("guardian.blocked", reason=verdict.reason)
-        update["final_answer"] = FinalAnswer(answer=verdict.message, citations=[])
-    return update
-
-
-def _render_history(history: list[dict[str, str]]) -> str:
-    if not history:
-        return "(new conversation)"
-    return "\n".join(f"{turn['role']}: {turn['content'][:300]}" for turn in history[-6:])
+        message = verdict.message or "I can only help with Polish legal questions."
+        update: dict[str, Any] = {
+            "final_report": message,
+            "messages": [AIMessage(content=message)],
+        }
+        return Command(goto=END, update=update)  # type: ignore[arg-type]
+    return Command(goto="query_rewriter")

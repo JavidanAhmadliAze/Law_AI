@@ -38,3 +38,15 @@ class AskResponse(BaseModel):
     answer: str
     citations: list[Citation] = []
     conversation_id: uuid.UUID
+
+
+class TokenResponse(BaseModel):
+    """One streamed unit of the answer (SSE `token` event payload)."""
+
+    text: str
+
+
+class ErrorResponse(BaseModel):
+    """Stream error payload (SSE `error` event)."""
+
+    detail: str

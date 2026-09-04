@@ -1,48 +1,38 @@
-"""Reasoning tools shared by agents.
+"""Functional tools for the agents.
 
-These are the ONLY tools in the graph — retrieval, translation and generation
-are injected services called directly by nodes, not LLM-bound tools.
+- think_tool: reflection scratchpad (used by supervisor and researcher).
+- retrieve:   wraps the injected search service as a research tool. The service
+              is read from the runtime config (services_from_config), so the tool
+              stays a plain module-level object with no bound state.
 
-- think_tool:   self-reflection ("is the evidence sufficient?") — drives the
-                sub_agent retry loop and the supervisor's go/no-go decision.
-- compress_tool: context engineering — distill retrieved passages into
-                {claim, source_article, quote} records (quotes verbatim, never
-                translated) so GraphState never accumulates raw passage dumps.
+Research topics reach the researcher already in Polish (the translator node seeds
+the supervisor with the Polish brief), so retrieve searches the query as-is.
 """
 
-from law_ai.schemas.chunk import RetrievedChunk
-from law_ai.services.agents import prompts
-from law_ai.services.agents.schemas import (
-    CompressedEvidence,
-    EvidenceItem,
-    ThinkResult,
-)
-from law_ai.services.llm.base import BaseLLM
+from typing import Any
+
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import tool
+
+from law_ai.services.agents.context import services_from_config
 
 
-async def think_tool(llm: BaseLLM, *, question: str, evidence: list[EvidenceItem]) -> ThinkResult:
-    evidence_block = (
-        "\n".join(f"- [{e.source_article}] {e.claim} — „{e.quote}”" for e in evidence)
-        or "(no evidence gathered)"
-    )
-    return await llm.generate_structured(
-        prompts.THINK,
-        f"Question: {question}\n\nEvidence so far:\n{evidence_block}",
-        ThinkResult,
-    )
+@tool
+def think_tool(reflection: str) -> str:
+    """Record a strategic reflection about progress and what to do next."""
+    return f"Reflection recorded: {reflection}"
 
 
-async def compress_tool(
-    llm: BaseLLM, *, question: str, chunks: list[RetrievedChunk]
-) -> list[EvidenceItem]:
+@tool
+async def retrieve(query: str, config: RunnableConfig) -> str:
+    """Search Polish legal sources for passages relevant to the query."""
+    services = services_from_config(config)
+    chunks = await services.search.retrieve(query, top_k=services.retriever_top_k)
     if not chunks:
-        return []
-    passages = "\n\n".join(
-        f"[{c.chunk.metadata.article or 'unknown'}] {c.chunk.text}" for c in chunks
+        return "No relevant passages found."
+    return "\n\n".join(
+        f"[{c.chunk.metadata.article} — {c.chunk.metadata.act}]\n{c.chunk.text}" for c in chunks
     )
-    compressed = await llm.generate_structured(
-        prompts.COMPRESS,
-        f"Question: {question}\n\nRetrieved passages:\n{passages}",
-        CompressedEvidence,
-    )
-    return compressed.items
+
+
+tools_by_name: dict[str, Any] = {"retrieve": retrieve, "think_tool": think_tool}

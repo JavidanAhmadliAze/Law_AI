@@ -51,7 +51,7 @@ class OpenSearchService(BaseSearchService):
         self._embedder = embedder
         self._tracer = tracer
         self._client: AsyncOpenSearch | None = None
-        self._reranker: Any = None  # lazy cross-encoder
+        self._reranker: Any = None  # lazy in-process cross-encoder
 
     # ------------------------------------------------------------ lifecycle
 
@@ -280,7 +280,7 @@ class OpenSearchService(BaseSearchService):
         ]
 
     async def _rerank(self, query: str, candidates: list[RetrievedChunk]) -> list[RetrievedChunk]:
-        """Cross-encoder rerank; no-op when RERANKER__MODEL is unset."""
+        """In-process cross-encoder rerank; no-op when RERANKER__MODEL is unset."""
         if not self._reranker_settings.model or not candidates:
             return candidates
         reranker = await self._ensure_reranker()

@@ -33,8 +33,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging(settings)
     stack = AsyncExitStack()
 
-    # --- database (users + conversations) --------------------------------
-    db = create_database(settings)
+    # --- database (users + conversations) --------------------------standard------
+    db = create_database(settings.postgres)
     await db.startup()
     app.state.db = db
     logger.info("Database is connected")
@@ -50,27 +50,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:  # noqa: BLE001 — degraded boot is intentional
         logger.warning("cache.disabled", reason=str(exc))
 
-    # --- services → agent graph ------------------------------------------
+    # --- services (parked on app.state for the agent you'll add) ----------
+    # The agent is injected via get_agentic_rag; assign your compiled graph to
+    # app.state.agentic_rag once you build it. Until then /ask/stream returns
+    # 503. The RAG services below are booted and parked so the agent can consume
+    # them (llm, search, translator, langfuse, checkpointer).
     app.state.agentic_rag = None
     app.state.langfuse = None
     app.state.search = None
+    app.state.llm = None
+    app.state.translator = None
+    app.state.checkpointer = None
     try:
-        from law_ai.services.agents.factory import create_agent_graph
         from law_ai.services.embedding.factory import create_embedder
         from law_ai.services.langfuse.factory import create_langfuse
         from law_ai.services.llm.factory import create_llm
         from law_ai.services.opensearch.factory import create_search_service
         from law_ai.services.translation.factory import create_translator
 
-        llm = create_llm(settings)
+        app.state.llm = create_llm(settings)
         embedder = create_embedder(settings)
         app.state.langfuse = create_langfuse(settings)
         search = create_search_service(settings, embedder, tracer=app.state.langfuse)
         await search.startup()
         app.state.search = search
-        translator = create_translator(settings, llm=llm)
+        app.state.translator = create_translator(settings, llm=app.state.llm)
 
-        checkpointer = None
         try:
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
@@ -78,14 +83,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 AsyncPostgresSaver.from_conn_string(settings.postgres.standard_dsn)
             )
             await checkpointer.setup()
-        except Exception as exc:  # graph still works, just without thread memory
+            app.state.checkpointer = checkpointer
+        except Exception as exc:  # optional — the agent works without thread memory
             logger.warning("checkpointer.unavailable", error=str(exc))
 
+        from law_ai.services.agents.factory import create_agent_graph
+
         app.state.agentic_rag = create_agent_graph(
-            llm=llm,
-            search=search,
-            translator=translator,
-            checkpointer=checkpointer,
+            llm=app.state.llm,
+            search=app.state.search,
+            translator=app.state.translator,
+            settings=settings,
+            checkpointer=app.state.checkpointer,
         )
         logger.info("rag.ready")
     except (ValueError, Exception) as exc:  # noqa: BLE001 — degraded boot is intentional

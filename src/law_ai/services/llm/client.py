@@ -4,6 +4,7 @@
 LangChain supports (anthropic, bedrock, openai, ollama, ...) works unchanged.
 """
 
+import json
 from typing import Any
 
 from langchain.chat_models import init_chat_model
@@ -47,7 +48,18 @@ class LangChainLLM(BaseLLM):
         return str(result.content)
 
     async def generate_structured[T: BaseModel](self, system: str, user: str, schema: type[T]) -> T:
-        structured = self._chat.with_structured_output(schema)
+        method = self._settings.structured_method
+        structured = self._chat.with_structured_output(schema, method=method)
+        # json_mode uses response_format (not tool_choice) — required for models
+        # that reject tool_choice (e.g. DeepSeek v4 "thinking"). It needs the
+        # word "json" plus the target shape in the prompt, so inject a schema hint.
+        if method == "json_mode":
+            # full schema (incl. $defs for nested models like Citation) so the
+            # model uses exact field names, not guesses (e.g. article vs source)
+            system = (
+                f"{system}\n\nRespond ONLY with a json object conforming to this "
+                f"JSON Schema: {json.dumps(schema.model_json_schema(), ensure_ascii=False)}"
+            )
         try:
             result = await structured.ainvoke(
                 [SystemMessage(content=system), HumanMessage(content=user)]

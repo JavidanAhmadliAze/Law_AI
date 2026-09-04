@@ -108,6 +108,7 @@ services:
       opensearch:
         condition: service_healthy
     command: standalone
+    profiles: ["ingest"]                        # offline pipeline only — start with: docker compose --profile ingest up airflow
 
   app:
     build:

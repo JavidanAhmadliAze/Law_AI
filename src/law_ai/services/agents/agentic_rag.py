@@ -1,90 +1,86 @@
-"""The agentic RAG pipeline (online).
+"""Graph assembly.
 
-    START → guardian ──blocked──────────────► END
-               │ ok
-           query_rewriter
-               │  (Send fan-out: one sub_agent per sub-question, parallel)
-           sub_agent × N ──► supervisor ──incomplete──► sub_agent × M (loop, budgeted)
-                                 │ complete
-                               writer ──► END
+Three StateGraphs:
+- researcher_graph — the research sub-agent (llm_call ↔ tool_node → compress).
+  Compiled once at module load; supervisor_tools invokes it (in parallel).
+- supervisor_graph — the non-deterministic orchestrator (supervisor ↔ tools),
+  embedded as a subgraph node in the general graph.
+- the general graph — deterministic gate/rewrite/translate around the supervisor
+  subgraph, then the streamed writer.
 
-Simple questions naturally take the fast path (one sub-question → one
-sub_agent); complex ones fan out and may loop once more via the supervisor.
+Services are bound into the general graph's config once via .with_config, so they
+propagate to every node, subgraph, tool, and the researcher graph invoked inside.
 """
 
 from typing import Any
 
-from langgraph.constants import END, START
-from langgraph.graph import StateGraph
-from langgraph.types import Send
+from langgraph.graph import END, START, StateGraph
 
 from law_ai.services.agents.context import AgentServices
 from law_ai.services.agents.nodes.guardian import guardian
 from law_ai.services.agents.nodes.query_rewriter import query_rewriter
-from law_ai.services.agents.nodes.sub_agent import sub_agent
-from law_ai.services.agents.nodes.supervisor import supervisor
+from law_ai.services.agents.nodes.researcher import (
+    compress_research,
+    llm_call,
+    should_continue,
+    tool_node,
+)
+from law_ai.services.agents.nodes.supervisor import supervisor, supervisor_tools
+from law_ai.services.agents.nodes.translator import translator
 from law_ai.services.agents.nodes.writer import writer
-from law_ai.services.agents.state import GraphState, SubAgentInput
+from law_ai.services.agents.state import (
+    AgentInputState,
+    AgentOutputState,
+    ResearcherState,
+    SupervisorState,
+)
 
 
-def _route_after_guardian(state: GraphState) -> str:
-    verdict = state.get("guardian_verdict")
-    return "query_rewriter" if verdict is not None and verdict.allowed else END
+def build_researcher() -> Any:
+    graph = StateGraph(ResearcherState)
+    graph.add_node("llm_call", llm_call)
+    graph.add_node("tool_node", tool_node)
+    graph.add_node("compress_research", compress_research)
+
+    graph.add_edge(START, "llm_call")
+    graph.add_conditional_edges(
+        "llm_call",
+        should_continue,
+        {"tool_node": "tool_node", "compress_research": "compress_research"},
+    )
+    graph.add_edge("tool_node", "llm_call")
+    graph.add_edge("compress_research", END)
+    return graph.compile()
 
 
-def _dispatch_sub_agents(state: GraphState) -> list[Send]:
-    return [
-        Send(
-            "sub_agent",
-            SubAgentInput(
-                sub_question=q,
-                article_filter=state.get("article_filter", ""),
-                query_language=state.get("query_language", "en"),
-            ),
-        )
-        for q in state.get("sub_questions", [])
-    ]
+# compiled once; invoked (in parallel) inside supervisor_tools
+researcher_graph = build_researcher()
 
 
-def _route_after_supervisor(state: GraphState) -> list[Send] | str:
-    additional = state.get("additional_questions", [])
-    if not additional:
-        return "writer"
-    return [
-        Send(
-            "sub_agent",
-            SubAgentInput(
-                sub_question=q,
-                article_filter="",
-                query_language=state.get("query_language", "en"),
-            ),
-        )
-        for q in additional
-    ]
+def build_supervisor() -> Any:
+    graph = StateGraph(SupervisorState)
+    graph.add_node("supervisor", supervisor)
+    graph.add_node("supervisor_tools", supervisor_tools)
+    graph.add_edge(START, "supervisor")
+    # supervisor and supervisor_tools route via Command(goto=...)
+    return graph.compile()
 
 
 def build_agentic_rag(services: AgentServices, checkpointer: Any = None) -> Any:
-    graph: StateGraph = StateGraph(GraphState)
-
-    # nodes are plain (state, config) coroutines; services reach them via the
-    # config bound below, so no per-node closures are needed.
+    graph = StateGraph(AgentOutputState, input_schema=AgentInputState)
     graph.add_node("guardian", guardian)
     graph.add_node("query_rewriter", query_rewriter)
-    # sub_agent's input is SubAgentInput (via Send), not GraphState — mypy can't
-    # reconcile that with the GraphState-typed graph; correct at runtime.
-    graph.add_node("sub_agent", sub_agent)  # type: ignore[arg-type]
-    graph.add_node("supervisor", supervisor)
+    graph.add_node("translator", translator)
+    graph.add_node("supervisor", build_supervisor())  # subgraph
     graph.add_node("writer", writer)
 
     graph.add_edge(START, "guardian")
-    graph.add_conditional_edges("guardian", _route_after_guardian, ["query_rewriter", END])
-    graph.add_conditional_edges("query_rewriter", _dispatch_sub_agents, ["sub_agent"])
-    graph.add_edge("sub_agent", "supervisor")
-    graph.add_conditional_edges("supervisor", _route_after_supervisor, ["sub_agent", "writer"])
+    # guardian routes via Command → query_rewriter or END
+    graph.add_edge("query_rewriter", "translator")
+    graph.add_edge("translator", "supervisor")
+    graph.add_edge("supervisor", "writer")
     graph.add_edge("writer", END)
 
-    # bind services into the graph's runtime config once — every node reads it
-    # via services_from_config; merges with ask.py's invoke-time config
     return graph.compile(checkpointer=checkpointer).with_config(
         {"configurable": {"services": services}}
     )

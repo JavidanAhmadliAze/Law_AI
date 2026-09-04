@@ -8,6 +8,8 @@ network hop), so auth, ownership checks and the RAG pipeline are exercised
 exactly as any other API client would.
 """
 
+import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 import gradio as gr
@@ -93,9 +95,11 @@ def build_gradio_ui(app: FastAPI) -> gr.Blocks:
 
     async def send(
         token: str, chat_id: str | None, question: str, thread: list[dict[str, str]]
-    ) -> tuple[Any, ...]:
+    ) -> AsyncIterator[tuple[Any, ...]]:
+        # async generator → Gradio streams each yield into the chat as it arrives
         if not question.strip():
-            return thread, "", gr.update()
+            yield thread, "", gr.update()
+            return
         if not chat_id:  # auto-create a chat for the first question
             async with _client(app) as client:
                 response = await client.post(
@@ -103,26 +107,52 @@ def build_gradio_ui(app: FastAPI) -> gr.Blocks:
                 )
             chat_id = response.json()["id"]
 
-        thread = [*thread, {"role": "user", "content": question}]
-        async with _client(app) as client:
-            response = await client.post(
-                f"/chats/{chat_id}/ask",
-                json={"question": question},
-                headers={"authorization": f"Bearer {token}"},
-                timeout=300.0,
+        auth = {"authorization": f"Bearer {token}"}
+        # show the user's message immediately, with an empty assistant bubble
+        thread = [
+            *thread,
+            {"role": "user", "content": question},
+            {"role": "assistant", "content": ""},
+        ]
+        yield thread, "", gr.update()
+
+        answer = ""
+        citations: list[dict[str, str]] = []
+        try:
+            async with (
+                _client(app) as client,
+                client.stream(
+                    "POST",
+                    f"/chats/{chat_id}/ask/stream",
+                    json={"question": question},
+                    headers=auth,
+                    timeout=300.0,
+                ) as resp,
+            ):
+                event: str | None = None
+                async for line in resp.aiter_lines():
+                    if line.startswith("event: "):
+                        event = line[7:]
+                    elif line.startswith("data: "):
+                        data = json.loads(line[6:])
+                        if event == "token":
+                            answer += data["text"]
+                            thread[-1] = {"role": "assistant", "content": answer}
+                            yield thread, "", gr.update()
+                        elif event == "final":
+                            citations = data.get("citations", [])
+                        elif event == "error":
+                            answer += f"\n\n⚠️ {data.get('detail', 'error')}"
+        except Exception as exc:  # noqa: BLE001 — show the user something, don't crash the UI
+            answer = answer or f"⚠️ {exc}"
+
+        if citations:
+            answer += "\n\n**Sources:**\n" + "\n".join(
+                f"- *{c['article']}*: „{c['quote']}”" for c in citations
             )
-        if response.status_code == 200:
-            data = response.json()
-            answer = data["answer"]
-            if data.get("citations"):
-                answer += "\n\n**Sources:**\n" + "\n".join(
-                    f"- *{c['article']}*: „{c['quote']}”" for c in data["citations"]
-                )
-        else:
-            answer = f"⚠️ {response.json().get('detail', 'Something went wrong')}"
-        thread = [*thread, {"role": "assistant", "content": answer}]
+        thread[-1] = {"role": "assistant", "content": answer}
         chats = await fetch_chats(token)
-        return thread, "", gr.update(choices=chats, value=chat_id)
+        yield thread, "", gr.update(choices=chats, value=chat_id)
 
     with gr.Blocks(title="Law-AI — Polish Law Assistant") as ui:
         token_state = gr.State(None)

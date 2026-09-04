@@ -6,11 +6,19 @@ typed results for deterministic graph routing.
 """
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from pydantic import BaseModel
 
 
 class BaseLLM(ABC):
+    @property
+    @abstractmethod
+    def chat_model(self) -> Any:
+        """Underlying chat model — for tool-bound / streaming agent calls
+        (e.g. `.bind_tools(...)`). Typed as Any to keep this contract free of a
+        specific SDK; concrete clients return their provider's chat model."""
+
     @abstractmethod
     async def generate(self, system: str, user: str) -> str:
         """Plain text completion."""

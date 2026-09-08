@@ -1,8 +1,20 @@
-"""Ask endpoint — streaming (SSE) over the agent graph.
+"""Ask endpoint — cached answers whole, fresh answers streamed.
 
-POST /chats/{id}/ask/stream streams the agent's tokens as they generate
-(text/event-stream), then a `final` event (citations) and `done`. The
-accumulated answer is persisted to history and cached once the stream completes.
+POST /chats/{id}/ask/stream answers in one of two shapes, so clients must
+branch on Content-Type:
+
+- cache hit  → application/json, a complete AskResponse. There is nothing to
+               stream: the answer already exists, so dribbling it out as fake
+               tokens would only add latency.
+- cache miss → text/event-stream: `token` events as the agent generates, then
+               `done`. The accumulated answer is persisted and cached before
+               `done` is sent, so a client that has seen it knows the turn is
+               fully written.
+
+Conversation memory is entirely the checkpointer's job: the graph is invoked
+with thread_id=chat_id and only the new question, so this router carries no
+notion of prior turns. The Postgres `messages` rows it writes are the UI's
+transcript (GET /chats/{id}/messages), never agent context.
 
 The agent is injected via `get_agentic_rag` (app.state.agentic_rag) — plug your
 compiled graph in there. Until one is set, this endpoint returns 503. The cache
@@ -16,7 +28,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessageChunk, HumanMessage
 
 from law_ai.dependencies import (
     AgentGraphDep,
@@ -24,35 +36,19 @@ from law_ai.dependencies import (
     ConversationRepoDep,
     CurrentUserDep,
 )
-from law_ai.exceptions import NotFoundError
-from law_ai.schemas.chat import AskRequest, AskResponse, Citation, ErrorResponse, TokenResponse
+from law_ai.models.conversation import NEW_CHAT_TITLE
+from law_ai.schemas.chat import AskRequest, AskResponse, ErrorResponse, TokenResponse
 
 router = APIRouter(prefix="/chats", tags=["ask"])
 
-_HISTORY_TURNS = 6
 _TITLE_LEN = 60
-
-
-async def _prepare(chats, user, chat_id, payload):  # type: ignore[no-untyped-def]
-    """Shared preamble: ownership check, history, persist user message, title."""
-    chat = await chats.get(chat_id)
-    if chat is None or chat.user_id != user.id:
-        raise NotFoundError("Chat not found")
-    history = [
-        {"role": m.role, "content": m.content}
-        for m in (await chats.list_messages(chat_id))[-_HISTORY_TURNS:]
-    ]
-    await chats.add_message(chat_id, "user", payload.question)
-    if chat.title == "New chat":
-        await chats.update(chat_id, {"title": payload.question[:_TITLE_LEN]})
-    return history
 
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-@router.post("/{chat_id}/ask/stream")
+@router.post("/{chat_id}/ask/stream", response_model=None)
 async def ask_stream(
     chat_id: uuid.UUID,
     payload: AskRequest,
@@ -60,58 +56,61 @@ async def ask_stream(
     chats: ConversationRepoDep,
     graph: AgentGraphDep,
     cache: CacheDep,
-) -> StreamingResponse:
-    """SSE: `token` events as the agent generates, then `final` (citations) + `done`."""
-    history = await _prepare(chats, user, chat_id, payload)
+) -> AskResponse | StreamingResponse:
+    """Cache hit → the whole AskResponse as JSON. Miss → an SSE token stream of
+    `token` events, then `done`."""
+    chat = await chats.get_chat(chat_id, user.id)  # 404s unless the caller owns it
+    # Postgres holds the UI transcript only (GET /chats/{id}/messages); the
+    # agent's conversation memory is the checkpointer, keyed on thread_id.
+    await chats.add_message(chat_id, "user", payload.question)
+    if chat.title == NEW_CHAT_TITLE:
+        await chats.update(chat_id, {"title": payload.question[:_TITLE_LEN]})
+
+    if cache is not None:
+        cached = await cache.find_cached_response(payload)
+        if cached is not None:
+            await chats.add_message(chat_id, "assistant", cached.answer)
+            # the stored conversation_id belongs to whichever chat first asked
+            # this question — the caller wants their own
+            return cached.model_copy(update={"conversation_id": chat_id})
 
     async def events() -> AsyncIterator[str]:
-        # cache hit → replay the stored answer as one token, then final
-        if cache is not None and not history:
-            cached = await cache.find_cached_response(payload)
-            if cached is not None:
-                yield _sse("token", TokenResponse(text=cached.answer).model_dump())
-                yield _sse(
-                    "final",
-                    {"citations": [c.model_dump() for c in cached.citations], "cached": True},
-                )
-                await chats.add_message(chat_id, "assistant", cached.answer)
-                yield _sse("done", {})
-                return
-
+        # only the new question: the checkpointer supplies the rest of the thread
         config = {"configurable": {"thread_id": str(chat_id)}}
-        messages: list[BaseMessage] = [
-            HumanMessage(content=m["content"])
-            if m["role"] == "user"
-            else AIMessage(content=m["content"])
-            for m in history
-        ]
-        messages.append(HumanMessage(content=payload.question))
         answer_parts: list[str] = []
-        citations: list[Citation] = []  # TODO: populate from your agent's output
         try:
             async for mode, chunk in graph.astream(
-                {"messages": messages},
+                {"messages": [HumanMessage(content=payload.question)]},
                 config=config,
                 stream_mode=["messages"],
             ):
                 if mode == "messages":
                     msg, meta = chunk
-                    # stream only the final writer node's tokens (rename to your node)
-                    if meta.get("langgraph_node") == "writer" and getattr(msg, "content", ""):
-                        answer_parts.append(msg.content)
-                        yield _sse("token", TokenResponse(text=msg.content).model_dump())
+                    # Only the writer node, and only its token deltas. The
+                    # AIMessageChunk check is load-bearing: LangGraph also emits
+                    # the AIMessage the writer returns in `messages` (via
+                    # on_chain_end), which would append the whole answer a
+                    # second time after the stream.
+                    if meta.get("langgraph_node") != "writer":
+                        continue
+                    if not isinstance(msg, AIMessageChunk):
+                        continue
+                    if text := msg.text:
+                        answer_parts.append(text)
+                        yield _sse("token", TokenResponse(text=text).model_dump())
         except Exception as exc:  # noqa: BLE001 — surface a clean stream error
             yield _sse("error", ErrorResponse(detail=str(exc)).model_dump())
             return
 
         answer = "".join(answer_parts)
-        yield _sse("final", {"citations": [c.model_dump() for c in citations], "cached": False})
 
         await chats.add_message(chat_id, "assistant", answer)
-        if cache is not None and not history and citations:
+        # `answer` is empty when no writer tokens streamed (e.g. a guardian
+        # refusal ends the graph early) — never cache that.
+        if cache is not None and answer:
             await cache.store_response(
                 payload,
-                AskResponse(answer=answer, citations=citations, conversation_id=chat_id),
+                AskResponse(answer=answer, conversation_id=chat_id),
             )
         yield _sse("done", {})
 

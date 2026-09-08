@@ -11,21 +11,9 @@ import uuid
 from fastapi import APIRouter, status
 
 from law_ai.dependencies import ConversationRepoDep, CurrentUserDep
-from law_ai.exceptions import NotFoundError
-from law_ai.models import Conversation
 from law_ai.schemas.chat import ChatCreate, ChatOut, MessageOut
 
 router = APIRouter(prefix="/chats", tags=["chats"])
-
-
-async def _owned_chat(
-    chats: ConversationRepoDep, user_id: uuid.UUID, chat_id: uuid.UUID
-) -> Conversation:
-    chat = await chats.get(chat_id)
-    if chat is None or chat.user_id != user_id:
-        # 404 (not 403) so chat ids of other users are not probeable
-        raise NotFoundError("Chat not found")
-    return chat
 
 
 @router.get("", response_model=list[ChatOut])
@@ -37,19 +25,29 @@ async def list_chats(user: CurrentUserDep, chats: ConversationRepoDep) -> list[C
 async def create_chat(
     payload: ChatCreate, user: CurrentUserDep, chats: ConversationRepoDep
 ) -> ChatOut:
+    # an unused chat from an earlier click has no messages and no real title —
+    # clear those out here rather than let them accumulate
+    await chats.delete_empty(user.id)
     chat = await chats.create({"user_id": user.id, "title": payload.title})
     return ChatOut.model_validate(chat)
+
+
+@router.get("/{chat_id}", response_model=ChatOut)
+async def get_chat(chat_id: uuid.UUID, user: CurrentUserDep, chats: ConversationRepoDep) -> ChatOut:
+    """Fetch one conversation. 404 when it does not exist *or* is not the
+    caller's — see ConversationRepository.get_chat."""
+    return ChatOut.model_validate(await chats.get_chat(chat_id, user.id))
 
 
 @router.get("/{chat_id}/messages", response_model=list[MessageOut])
 async def list_messages(
     chat_id: uuid.UUID, user: CurrentUserDep, chats: ConversationRepoDep
 ) -> list[MessageOut]:
-    await _owned_chat(chats, user.id, chat_id)
+    await chats.get_chat(chat_id, user.id)  # 404s unless the caller owns it
     return [MessageOut.model_validate(m) for m in await chats.list_messages(chat_id)]
 
 
 @router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_chat(chat_id: uuid.UUID, user: CurrentUserDep, chats: ConversationRepoDep) -> None:
-    await _owned_chat(chats, user.id, chat_id)
+    await chats.get_chat(chat_id, user.id)  # 404s unless the caller owns it
     await chats.delete(chat_id)

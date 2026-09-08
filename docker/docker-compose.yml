@@ -117,14 +117,25 @@ services:
     env_file:
       - ../.env
     environment:
+      # override the .env localhost/host-port values with compose network names +
+      # internal ports — inside the container "localhost" is the app itself
       POSTGRES__HOST: postgres
+      POSTGRES__PORT: "5432"
       OPENSEARCH__HOST: opensearch
+      OPENSEARCH__PORT: "9200"
+      EMBEDDING__API_URL: http://tei:80
+      REDIS__HOST: redis
+      REDIS__PORT: "6379"
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
       opensearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      tei:
         condition: service_healthy
     profiles: ["app"]                          # start with: docker compose --profile app up
 

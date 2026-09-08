@@ -5,6 +5,7 @@ LangChain supports (anthropic, bedrock, openai, ollama, ...) works unchanged.
 """
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain.chat_models import init_chat_model
@@ -47,6 +48,20 @@ class LangChainLLM(BaseLLM):
             raise GenerationError(f"LLM call failed: {exc}") from exc
         return str(result.content)
 
+    async def stream(self, system: str, user: str) -> AsyncIterator[str]:
+        """Token deltas from `.astream` — this is what makes LangGraph's
+        `stream_mode="messages"` fire `on_llm_new_token`, so the writer node's
+        tokens reach the SSE router as they generate instead of in one lump at
+        the end."""
+        messages = [SystemMessage(content=system), HumanMessage(content=user)]
+        try:
+            async for chunk in self._chat.astream(messages):
+                if text := chunk.text:
+                    yield text
+        except Exception as exc:  # provider errors normalized to domain error
+            logger.error("llm.stream_failed", error=str(exc))
+            raise GenerationError(f"LLM stream failed: {exc}") from exc
+
     async def generate_structured[T: BaseModel](self, system: str, user: str, schema: type[T]) -> T:
         method = self._settings.structured_method
         structured = self._chat.with_structured_output(schema, method=method)
@@ -54,8 +69,8 @@ class LangChainLLM(BaseLLM):
         # that reject tool_choice (e.g. DeepSeek v4 "thinking"). It needs the
         # word "json" plus the target shape in the prompt, so inject a schema hint.
         if method == "json_mode":
-            # full schema (incl. $defs for nested models like Citation) so the
-            # model uses exact field names, not guesses (e.g. article vs source)
+            # full schema (incl. $defs for nested models) so the model uses
+            # exact field names, not guesses
             system = (
                 f"{system}\n\nRespond ONLY with a json object conforming to this "
                 f"JSON Schema: {json.dumps(schema.model_json_schema(), ensure_ascii=False)}"

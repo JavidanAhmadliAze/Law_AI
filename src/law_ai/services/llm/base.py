@@ -6,6 +6,7 @@ typed results for deterministic graph routing.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from typing import Any
 
 from pydantic import BaseModel
@@ -22,6 +23,16 @@ class BaseLLM(ABC):
     @abstractmethod
     async def generate(self, system: str, user: str) -> str:
         """Plain text completion."""
+
+    @abstractmethod
+    def stream(self, system: str, user: str) -> AsyncIterator[str]:
+        """Plain text completion, yielded as content deltas.
+
+        Callers that need tokens to reach the transport as they are produced
+        (the writer node → SSE) must use this rather than `generate`: a
+        non-streaming invoke emits no token callbacks, so LangGraph's
+        `stream_mode="messages"` can only surface the whole message at the end.
+        """
 
     @abstractmethod
     async def generate_structured[T: BaseModel](self, system: str, user: str, schema: type[T]) -> T:

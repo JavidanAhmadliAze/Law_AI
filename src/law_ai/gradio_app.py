@@ -117,7 +117,6 @@ def build_gradio_ui(app: FastAPI) -> gr.Blocks:
         yield thread, "", gr.update()
 
         answer = ""
-        citations: list[dict[str, str]] = []
         try:
             async with (
                 _client(app) as client,
@@ -139,17 +138,11 @@ def build_gradio_ui(app: FastAPI) -> gr.Blocks:
                             answer += data["text"]
                             thread[-1] = {"role": "assistant", "content": answer}
                             yield thread, "", gr.update()
-                        elif event == "final":
-                            citations = data.get("citations", [])
                         elif event == "error":
                             answer += f"\n\n⚠️ {data.get('detail', 'error')}"
         except Exception as exc:  # noqa: BLE001 — show the user something, don't crash the UI
             answer = answer or f"⚠️ {exc}"
 
-        if citations:
-            answer += "\n\n**Sources:**\n" + "\n".join(
-                f"- *{c['article']}*: „{c['quote']}”" for c in citations
-            )
         thread[-1] = {"role": "assistant", "content": answer}
         chats = await fetch_chats(token)
         yield thread, "", gr.update(choices=chats, value=chat_id)

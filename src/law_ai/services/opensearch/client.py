@@ -22,7 +22,7 @@ from law_ai.services.opensearch.base import BaseSearchService
 logger = get_logger(__name__)
 
 _RRF_K = 60  # standard reciprocal-rank-fusion constant
-_CANDIDATES_PER_LEG = 25  # candidates fetched per leg before fusion/rerank
+_CANDIDATES_PER_LEG = 25  # candidates fetched per leg before fusion
 
 # keyword types make `term` metadata filters exact (no analysis)
 _METADATA_MAPPING: dict[str, Any] = {
@@ -52,6 +52,11 @@ class OpenSearchService(BaseSearchService):
         self._tracer = tracer
         self._client: AsyncOpenSearch | None = None
         self._reranker: Any = None  # lazy in-process cross-encoder
+        # researchers retrieve concurrently (supervisor_tools gathers them), so
+        # the lazy load needs a gate: without it every concurrent caller passes
+        # the `is None` check before any of them assigns, and each loads its own
+        # copy of a multi-GB model. Same double-checked pattern as LocalEmbedder.
+        self._reranker_lock = asyncio.Lock()
 
     # ------------------------------------------------------------ lifecycle
 
@@ -175,6 +180,8 @@ class OpenSearchService(BaseSearchService):
         top_k: int = 5,
         filters: dict[str, str] | None = None,
     ) -> list[RetrievedChunk]:
+        """Hybrid search + RRF fusion only. Reranking is a separate step — call
+        `rerank` on the results when you want it."""
         span_cm = (
             self._tracer.span(
                 "retrieval", input={"query": query, "top_k": top_k, "filters": filters}
@@ -207,24 +214,18 @@ class OpenSearchService(BaseSearchService):
             dense_res, sparse_res = await asyncio.gather(dense_task, sparse_task)
 
             fused = self._rrf_fuse([self._hits(dense_res), self._hits(sparse_res)])
-            candidates = fused[: max(top_k * 3, top_k)]  # rerank pool
-            reranked = await self._rerank(query, candidates)
-            results = reranked[:top_k]
+            results = fused[:top_k]
 
             if span is not None:
-                rrf_by_id = {c.chunk.chunk_id: c.score for c in candidates}
                 span.update(
                     output={
-                        "rerank_enabled": bool(self._reranker_settings.model),
                         "candidates_after_fusion": len(fused),
-                        "rerank_pool": len(candidates),
                         "results": [
                             {
                                 "chunk_id": r.chunk.chunk_id,
                                 "article": r.chunk.metadata.article,
                                 "act": r.chunk.metadata.act,
-                                "rrf_score": round(rrf_by_id.get(r.chunk.chunk_id, 0.0), 5),
-                                "rerank_score": round(r.score, 5),
+                                "rrf_score": round(r.score, 5),
                                 "text_preview": r.chunk.text[:200],
                             }
                             for r in results
@@ -279,25 +280,43 @@ class OpenSearchService(BaseSearchService):
             for chunk_id, score in ranked
         ]
 
-    async def _rerank(self, query: str, candidates: list[RetrievedChunk]) -> list[RetrievedChunk]:
-        """In-process cross-encoder rerank; no-op when RERANKER__MODEL is unset."""
+    async def rerank(
+        self,
+        query: str,
+        candidates: list[RetrievedChunk],
+        *,
+        top_k: int | None = None,
+    ) -> list[RetrievedChunk]:
+        """Cross-encoder rerank of an arbitrary candidate set.
+
+        Deliberately separate from `retrieve`: the caller decides what pool to
+        score and when. That is what makes a pooled rerank possible — gather
+        candidates from several searches, then score them all in one call
+        instead of once per search.
+
+        Scores are query-conditional, so `query` must be the question these
+        candidates should be judged against. No-op when RERANKER__MODEL is unset.
+        """
         if not self._reranker_settings.model or not candidates:
-            return candidates
+            return candidates[:top_k] if top_k is not None else candidates
         reranker = await self._ensure_reranker()
         pairs = [(query, c.chunk.text) for c in candidates]
         scores = await asyncio.to_thread(reranker.predict, pairs)
         reranked = sorted(
             zip(candidates, scores, strict=True), key=lambda item: item[1], reverse=True
         )
-        return [RetrievedChunk(chunk=c.chunk, score=float(s)) for c, s in reranked]
+        scored = [RetrievedChunk(chunk=c.chunk, score=float(s)) for c, s in reranked]
+        return scored[:top_k] if top_k is not None else scored
 
     async def _ensure_reranker(self) -> Any:
         if self._reranker is None:
+            async with self._reranker_lock:
+                if self._reranker is None:
 
-            def _load() -> Any:
-                from sentence_transformers import CrossEncoder  # lazy: heavy import
+                    def _load() -> Any:
+                        from sentence_transformers import CrossEncoder  # lazy: heavy import
 
-                return CrossEncoder(self._reranker_settings.model)
+                        return CrossEncoder(self._reranker_settings.model)
 
-            self._reranker = await asyncio.to_thread(_load)
+                    self._reranker = await asyncio.to_thread(_load)
         return self._reranker

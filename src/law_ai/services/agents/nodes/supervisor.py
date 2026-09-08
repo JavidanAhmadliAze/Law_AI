@@ -13,14 +13,14 @@ from typing import Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.graph import END
+from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from law_ai.services.agents import prompt
 from law_ai.services.agents.context import services_from_config
-from law_ai.services.agents.schema import ConductResearch, ResearchComplete
+from law_ai.services.agents.nodes.researcher import researcher_graph
 from law_ai.services.agents.state import SupervisorState
-from law_ai.services.agents.tools import think_tool
+from law_ai.services.agents.tools import ConductResearch, ResearchComplete, think_tool
 
 
 async def supervisor(
@@ -42,9 +42,6 @@ async def supervisor(
 async def supervisor_tools(
     state: SupervisorState, config: RunnableConfig
 ) -> Command[Literal["supervisor", "__end__"]]:
-    # lazy import: the compiled research graph lives in agentic_rag (avoids a cycle)
-    from law_ai.services.agents.agentic_rag import researcher_graph
-
     services = services_from_config(config)
     last = state["supervisor_message"][-1]
     tool_calls: list[dict[str, Any]] = list(getattr(last, "tool_calls", []) or [])
@@ -52,7 +49,8 @@ async def supervisor_tools(
 
     complete = (
         not tool_calls
-        or any(tc["name"] == ResearchComplete.__name__ for tc in tool_calls)
+        # .name exists at runtime (StructuredTool); mypy sees the pre-@tool class
+        or any(tc["name"] == ResearchComplete.name for tc in tool_calls)  # type: ignore[attr-defined]
         or iterations >= services.max_research_iterations
     )
     if complete:
@@ -68,7 +66,7 @@ async def supervisor_tools(
                 ToolMessage(content=str(observation), name=tc["name"], tool_call_id=tc["id"])
             )
 
-    conduct = [tc for tc in tool_calls if tc["name"] == ConductResearch.__name__]
+    conduct = [tc for tc in tool_calls if tc["name"] == ConductResearch.name]  # type: ignore[attr-defined]
     if conduct:
         results = await asyncio.gather(
             *[
@@ -88,3 +86,12 @@ async def supervisor_tools(
             tool_messages.append(ToolMessage(content=note, name=tc["name"], tool_call_id=tc["id"]))
 
     return Command(goto="supervisor", update={"supervisor_message": tool_messages, "notes": notes})
+
+
+def build_supervisor() -> Any:
+    """The research orchestrator: supervisor ⇄ supervisor_tools (Command-routed)."""
+    graph = StateGraph(SupervisorState)
+    graph.add_node("supervisor", supervisor)
+    graph.add_node("supervisor_tools", supervisor_tools)
+    graph.add_edge(START, "supervisor")
+    return graph.compile()

@@ -1,8 +1,8 @@
-"""Structured schemas: typed outputs for deterministic nodes + supervisor tools.
+"""Structured outputs for the deterministic nodes.
 
-The deterministic nodes (guardian, query_rewriter) use these with the LLM's
-structured-output path; ConductResearch/ResearchComplete are bound as tools on
-the supervisor model (their class names become the tool names).
+The guardian and query_rewriter use these with the LLM's structured-output path.
+The supervisor's tools (ConductResearch/ResearchComplete/think_tool) live in
+tools.py — they're bound to the model, not parsed as structured output.
 """
 
 from pydantic import BaseModel, Field
@@ -19,16 +19,3 @@ class RewrittenQuery(BaseModel):
         description="A single, self-contained research brief in English describing what "
         "must be researched in Polish law to answer the user's question."
     )
-
-
-class ConductResearch(BaseModel):
-    """Tool for delegating a research task to a specialized sub-agent."""
-
-    research_topic: str = Field(
-        description="The topic to research. Should be a single topic, and should be "
-        "described in high detail (at least a paragraph).",
-    )
-
-
-class ResearchComplete(BaseModel):
-    """Tool for indicating that the research process is complete."""

@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.graph import END, START, StateGraph
 
 from law_ai.services.agents import prompt
 from law_ai.services.agents.context import services_from_config
@@ -69,3 +70,25 @@ async def compress_research(state: ResearcherState, config: RunnableConfig) -> d
         f"Research topic: {state['research_topic']}\n\nRaw findings:\n{findings}",
     )
     return {"compressed_research": compressed}
+
+
+def build_researcher() -> Any:
+    """The research sub-agent: llm_call ↔ tool_node, then compress → END."""
+    graph = StateGraph(ResearcherState)
+    graph.add_node("llm_call", llm_call)
+    graph.add_node("tool_node", tool_node)
+    graph.add_node("compress_research", compress_research)
+
+    graph.add_edge(START, "llm_call")
+    graph.add_conditional_edges(
+        "llm_call",
+        should_continue,
+        {"tool_node": "tool_node", "compress_research": "compress_research"},
+    )
+    graph.add_edge("tool_node", "llm_call")
+    graph.add_edge("compress_research", END)
+    return graph.compile()
+
+
+# compiled once; invoked (in parallel) inside supervisor_tools
+researcher_graph = build_researcher()

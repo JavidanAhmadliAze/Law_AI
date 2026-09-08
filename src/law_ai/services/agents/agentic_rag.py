@@ -1,15 +1,12 @@
-"""Graph assembly.
+"""General graph assembly.
 
-Three StateGraphs:
-- researcher_graph — the research sub-agent (llm_call ↔ tool_node → compress).
-  Compiled once at module load; supervisor_tools invokes it (in parallel).
-- supervisor_graph — the non-deterministic orchestrator (supervisor ↔ tools),
-  embedded as a subgraph node in the general graph.
-- the general graph — deterministic gate/rewrite/translate around the supervisor
-  subgraph, then the streamed writer.
+Deterministic gate/rewrite/translate around the supervisor subgraph, then the
+streamed writer. The two subgraphs are built where their nodes live
+(nodes/researcher.py, nodes/supervisor.py); here we only wire the top level.
 
-Services are bound into the general graph's config once via .with_config, so they
-propagate to every node, subgraph, tool, and the researcher graph invoked inside.
+Services are bound into the graph's config once via .with_config, so they
+propagate to every node, the supervisor subgraph, its tools, and the researcher
+graph invoked inside it.
 """
 
 from typing import Any
@@ -19,51 +16,10 @@ from langgraph.graph import END, START, StateGraph
 from law_ai.services.agents.context import AgentServices
 from law_ai.services.agents.nodes.guardian import guardian
 from law_ai.services.agents.nodes.query_rewriter import query_rewriter
-from law_ai.services.agents.nodes.researcher import (
-    compress_research,
-    llm_call,
-    should_continue,
-    tool_node,
-)
-from law_ai.services.agents.nodes.supervisor import supervisor, supervisor_tools
+from law_ai.services.agents.nodes.supervisor import build_supervisor
 from law_ai.services.agents.nodes.translator import translator
 from law_ai.services.agents.nodes.writer import writer
-from law_ai.services.agents.state import (
-    AgentInputState,
-    AgentOutputState,
-    ResearcherState,
-    SupervisorState,
-)
-
-
-def build_researcher() -> Any:
-    graph = StateGraph(ResearcherState)
-    graph.add_node("llm_call", llm_call)
-    graph.add_node("tool_node", tool_node)
-    graph.add_node("compress_research", compress_research)
-
-    graph.add_edge(START, "llm_call")
-    graph.add_conditional_edges(
-        "llm_call",
-        should_continue,
-        {"tool_node": "tool_node", "compress_research": "compress_research"},
-    )
-    graph.add_edge("tool_node", "llm_call")
-    graph.add_edge("compress_research", END)
-    return graph.compile()
-
-
-# compiled once; invoked (in parallel) inside supervisor_tools
-researcher_graph = build_researcher()
-
-
-def build_supervisor() -> Any:
-    graph = StateGraph(SupervisorState)
-    graph.add_node("supervisor", supervisor)
-    graph.add_node("supervisor_tools", supervisor_tools)
-    graph.add_edge(START, "supervisor")
-    # supervisor and supervisor_tools route via Command(goto=...)
-    return graph.compile()
+from law_ai.services.agents.state import AgentInputState, AgentOutputState
 
 
 def build_agentic_rag(services: AgentServices, checkpointer: Any = None) -> Any:

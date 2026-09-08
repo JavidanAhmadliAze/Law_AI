@@ -3,7 +3,7 @@ import uuid
 import redis.asyncio as aioredis
 
 from law_ai.config import RedisSettings
-from law_ai.schemas.chat import AskRequest, AskResponse, Citation
+from law_ai.schemas.chat import AskRequest, AskResponse
 from law_ai.services.cache.client import CacheClient
 
 _FINGERPRINT = {"llm": "deepseek:deepseek-chat", "embedding": "BAAI/bge-m3"}
@@ -44,7 +44,6 @@ def _client(fake: FakeRedis | None = None) -> tuple[CacheClient, FakeRedis]:
 def _response(answer: str = "Art. 659 KC says...") -> AskResponse:
     return AskResponse(
         answer=answer,
-        citations=[Citation(article="Art. 659", quote="Przez umowę najmu...")],
         conversation_id=uuid.uuid4(),
     )
 
@@ -75,13 +74,14 @@ def test_fingerprint_changes_key() -> None:
 async def test_store_then_find_roundtrip() -> None:
     client, fake = _client()
     request = AskRequest(question="Who inherits first?")
-    await client.store_response(request, _response())
+    stored = _response()
+    await client.store_response(request, stored)
     assert fake.ttls[client._generate_cache_key(request)] == 2 * 3600  # ttl_hours applied
 
     found = await client.find_cached_response(request)
     assert found is not None
-    assert found.answer.startswith("Art. 659")
-    assert found.citations[0].article == "Art. 659"
+    assert found.answer == stored.answer
+    assert found.conversation_id == stored.conversation_id
 
 
 async def test_miss_returns_none() -> None:
@@ -101,4 +101,5 @@ async def test_redis_errors_degrade_to_miss() -> None:
     fake.fail = True
     request = AskRequest(question="redis is down")
     assert await client.find_cached_response(request) is None  # no exception escapes
-    await client.store_response(request, _response())  # store swallows the error too
+    stored = _response()
+    await client.store_response(request, stored)  # store swallows the error too

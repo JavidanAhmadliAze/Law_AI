@@ -22,7 +22,7 @@ async def guardian(
 ) -> Command[Literal["query_rewriter", "__end__"]]:
     services = services_from_config(config)
     question = last_human(list(state["messages"]))
-    verdict: GuardianVerdict = await services.llm.generate_structured(
+    verdict: GuardianVerdict = await services.fast_llm.generate_structured(
         prompt.GUARDIAN, question, GuardianVerdict
     )
     if not verdict.allowed:

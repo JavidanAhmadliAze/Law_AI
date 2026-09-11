@@ -1,22 +1,17 @@
 """Graph states.
 
 - AgentInputState  — what the router hands the graph (just messages).
-- AgentOutputState — the general graph's working/output state.
-- SupervisorState  — the supervisor subgraph (adds its private loop counter).
-- ResearcherState  — the research subgraph (invoked per topic by the supervisor).
+- AgentOutputState — the chain's working/output state.
 
-`supervisor_message` and `researcher_messages` use the add_messages reducer so
-appends merge correctly; `notes` uses an additive reducer so parallel research
-results concatenate instead of clobbering.
+The chain is linear, so no channel needs a merge reducer for concurrent writers;
+`notes` keeps an additive reducer only because `messages` semantics come from
+MessagesState and notes are appended alongside them.
 """
 
 import operator
-from collections.abc import Sequence
-from typing import Annotated, TypedDict
+from typing import Annotated, Any
 
-from langchain_core.messages import BaseMessage
 from langgraph.graph import MessagesState
-from langgraph.graph.message import add_messages
 
 
 class AgentInputState(MessagesState):
@@ -24,24 +19,16 @@ class AgentInputState(MessagesState):
 
 
 class AgentOutputState(MessagesState):
-    rewritten_query: str
-    supervisor_message: Annotated[Sequence[BaseMessage], add_messages]
+    research_brief_pl: str  # the rewriter's reading of the question (Polish); traced, not searched
+    # What retrieval actually runs — ALWAYS at least one. The rewriter decides
+    # how many searches a question needs; the retriever only decides how to
+    # spend its budget across them.
+    search_queries_pl: list[str]
+    # optional metadata narrowing for retrieval, e.g. {"domain": "employment"}
+    metadata_filters: dict[str, str]
     notes: Annotated[list[str], operator.add]
+    # what the notes were built from: article, act and cross-encoder score. The
+    # formatted notes lose all of it, and it is what tells you whether a passage
+    # won on merit or was carried in by its article.
+    retrieved: list[dict[str, Any]]
     final_report: str
-
-
-class SupervisorState(TypedDict):
-    # shared with the parent AgentOutputState (same names + reducers) so they
-    # cross the subgraph boundary: supervisor_message in, notes out
-    rewritten_query: str
-    supervisor_message: Annotated[Sequence[BaseMessage], add_messages]
-    notes: Annotated[list[str], operator.add]
-    # private to the supervisor loop — not shared with the parent
-    research_iterations: int
-    final_report: str
-
-
-class ResearcherState(TypedDict):
-    researcher_messages: Annotated[Sequence[BaseMessage], add_messages]
-    research_topic: str
-    compressed_research: str

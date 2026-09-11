@@ -13,17 +13,16 @@ from langchain_core.runnables import RunnableConfig
 
 from law_ai.services.llm.base import BaseLLM
 from law_ai.services.opensearch.base import BaseSearchService
-from law_ai.services.translation.base import BaseTranslator
 
 
 @dataclass
 class AgentServices:
-    llm: BaseLLM
+    llm: BaseLLM  # generation (writer)
+    fast_llm: BaseLLM  # guardian / query rewriter — cheap, deterministic work
     search: BaseSearchService
-    translator: BaseTranslator
-    max_research_iterations: int = 3
-    researcher_max_tool_calls: int = 5
-    retriever_top_k: int = 5
+    retriever_top_k: int = 12
+    rerank_budget: int = 45
+    min_candidates_per_query: int = 8
 
 
 def services_from_config(config: RunnableConfig) -> AgentServices:

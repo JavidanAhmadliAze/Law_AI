@@ -15,7 +15,14 @@ class GuardianVerdict(BaseModel):
 
 
 class RewrittenQuery(BaseModel):
-    research_brief: str = Field(
-        description="A single, self-contained research brief in English describing what "
-        "must be researched in Polish law to answer the user's question."
+    research_brief_pl: str = Field(
+        description="A single, self-contained research brief IN POLISH describing what "
+        "must be researched to answer the user's question. This is what retrieval "
+        "searches on, so it must use the terminology the statutes themselves use."
+    )
+    sub_queries_pl: list[str] = Field(
+        default_factory=list,
+        description="Search queries IN POLISH, one per genuinely independent legal issue. "
+        "Leave EMPTY unless the question really covers separate issues that different "
+        "articles govern — splitting a single-issue question only dilutes retrieval.",
     )

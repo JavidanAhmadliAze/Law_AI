@@ -32,3 +32,17 @@ airflow/webserver_config.py
 .idea/
 .vscode/
 .DS_Store
+
+# GEPA checkpoint state (resumable run artifacts, not source)
+gepa_runs/
+
+# --- model weights, experiment outputs, local datasets ---
+fine_tuning/
+subquery_eval/out/
+evaluation/datasets/*
+!evaluation/datasets/.gitkeep
+
+# --- datasets (all) ---
+*.jsonl
+dataset_corrected.jsonl
+golden_dataset*.jsonl

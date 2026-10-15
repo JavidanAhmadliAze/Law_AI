@@ -11,8 +11,6 @@ from law_ai.services.opensearch.base import BaseSearchService
 from law_ai.services.reranker.base import BaseReranker
 
 
-
-
 def create_agent_graph(
     *,
     llm: BaseLLM,

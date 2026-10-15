@@ -6,7 +6,7 @@ services_from_config — no per-node closures, no module-level singletons.
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -18,11 +18,11 @@ from law_ai.services.reranker.base import BaseReranker
 
 @dataclass(kw_only=True)
 class AgentServices:
-    llm: Optional[BaseLLM] = None
-    fast_llm: Optional[BaseLLM] = None
-    reasoning_llm: Optional[BaseLLM] = None
+    llm: BaseLLM | None = None
+    fast_llm: BaseLLM | None = None
+    reasoning_llm: BaseLLM | None = None
     search: BaseSearchService
-    reranker: Optional[BaseReranker] = None
+    reranker: BaseReranker | None = None
     score_floor: float = 0.0
     max_chunks: int = 0
     rerank_candidates_size: int = 0

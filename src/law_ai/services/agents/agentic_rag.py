@@ -25,10 +25,10 @@ from langgraph.graph import END, START, StateGraph
 
 from law_ai.services.agents.context import AgentServices
 from law_ai.services.agents.nodes.guardian import guardian
+from law_ai.services.agents.nodes.query_rewriter import query_rewriter
 from law_ai.services.agents.nodes.retriever import retriever
 from law_ai.services.agents.nodes.writer import writer
 from law_ai.services.agents.state import AgentInputState, AgentState
-from law_ai.services.agents.nodes.query_rewriter import query_rewriter
 
 
 def build_agentic_rag(

@@ -91,6 +91,18 @@ class OpenSearchService(BaseSearchService):
 
     # ------------------------------------------------------------ indexing
 
+    async def _analyzer(self) -> str:
+        """The Polish (stempel) analyzer when the plugin is installed, else standard.
+
+        An index's analyzer is fixed when it is created, so this is decided once,
+        here. docker/Dockerfile.opensearch installs analysis-stempel; a plain
+        OpenSearch image does not, and creating an index with an unknown
+        analyzer would fail outright.
+        """
+        plugins = await self._require_client().cat.plugins(format="json")
+        installed = {p.get("component") for p in plugins or []}
+        return "polish" if "analysis-stempel" in installed else "standard"
+
     async def ensure_index(self) -> None:
         client = self._require_client()
         if await client.indices.exists(index=self._settings.index):
@@ -145,8 +157,6 @@ class OpenSearchService(BaseSearchService):
         await client.indices.refresh(index=self._settings.index)
         logger.info("opensearch.indexed", count=success)
         return int(success)
-
-
 
     # ------------------------------------------------------------ retrieval
 
@@ -382,7 +392,6 @@ class OpenSearchService(BaseSearchService):
             for chunk_id, rank in ranked
         ], legs_meta
 
-
     async def get_chunks(
         self,
         *,
@@ -402,11 +411,7 @@ class OpenSearchService(BaseSearchService):
         if act:
             filters.append({"term": {"metadata.act": act}})
 
-        query = (
-            {"bool": {"filter": filters}}
-            if filters
-            else {"match_all": {}}
-        )
+        query = {"bool": {"filter": filters}} if filters else {"match_all": {}}
 
         response = await client.search(
             index=self._settings.index,
@@ -427,6 +432,7 @@ class OpenSearchService(BaseSearchService):
             }
             for hit in response["hits"]["hits"]
         ]
+
     async def update_chunk_metadata(
         self,
         chunk_id: str,
@@ -454,12 +460,13 @@ class OpenSearchService(BaseSearchService):
                 }
             },
         )
+
     async def count_chunks(
-    self,
-    *,
-    act: str | None = None,
-    article: str | None = None,
-) -> int:
+        self,
+        *,
+        act: str | None = None,
+        article: str | None = None,
+    ) -> int:
 
         client = self._require_client()
 
@@ -471,11 +478,7 @@ class OpenSearchService(BaseSearchService):
         if article:
             filters.append({"term": {"metadata.article": article}})
 
-        query = (
-            {"bool": {"filter": filters}}
-            if filters
-            else {"match_all": {}}
-        )
+        query = {"bool": {"filter": filters}} if filters else {"match_all": {}}
 
         response = await client.count(
             index=self._settings.index,

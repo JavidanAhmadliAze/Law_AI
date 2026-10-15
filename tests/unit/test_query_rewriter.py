@@ -47,8 +47,13 @@ def test_clean_normalises_dedupes_validates_acts_and_caps() -> None:
 
 @pytest.mark.asyncio
 async def test_node_returns_the_cleaned_plan_and_uses_the_reasoning_llm() -> None:
-    chat, reasoning = _FakeLLM({"ignored": "pit"}), _FakeLLM({"stawka podatku od umowy sprzedaży": "pcc"})
-    out = await query_rewriter(_state("Kupiłem auto"), _config(chat, reasoning_llm=cast(Any, reasoning)))
+    chat, reasoning = (
+        _FakeLLM({"ignored": "pit"}),
+        _FakeLLM({"stawka podatku od umowy sprzedaży": "pcc"}),
+    )
+    out = await query_rewriter(
+        _state("Kupiłem auto"), _config(chat, reasoning_llm=cast(Any, reasoning))
+    )
     assert out == {"search_queries_pl": {"stawka podatku od umowy sprzedaży": "pcc"}}
     assert reasoning.calls and not chat.calls
     system, user = reasoning.calls[0]

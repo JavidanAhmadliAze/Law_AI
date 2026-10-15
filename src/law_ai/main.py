@@ -93,6 +93,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.warning("checkpointer.unavailable", error=str(exc))
 
         from law_ai.services.agents.factory import create_agent_graph
+
         app.state.agentic_rag = create_agent_graph(
             llm=app.state.llm,
             fast_llm=app.state.fast_llm,

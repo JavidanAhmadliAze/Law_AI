@@ -53,12 +53,12 @@ async def retriever(state: AgentState, config: RunnableConfig) -> dict[str, Any]
         )
     )
 
+    reranker = services.reranker
+    if reranker is None:
+        raise RuntimeError("retriever needs a reranker in the agent services")
     ranked_per_query = await asyncio.gather(
-        *(
-            services.reranker.rerank(q, pool)
-            for (q, _), pool in zip(query_act_pairs, pools, strict=True)
-        )
-)
+        *(reranker.rerank(q, pool) for (q, _), pool in zip(query_act_pairs, pools, strict=True))
+    )
     # Normalise each sub-query's scores by its own best, so the merge compares
     # like with like. The cross-encoder returns unbounded logits and they are
     # query-conditional: one sub-query's best hit scores 11 while another's
@@ -92,8 +92,11 @@ async def retriever(state: AgentState, config: RunnableConfig) -> dict[str, Any]
     # siblings' is still the one its sub-query was planned to find.
     if services.delivery_score_cut > 0:
         floor = max(services.delivery_min_chunks, len(query_act_pairs))
-        chunks = [c for i, c in enumerate(chunks)
-                  if normalised[c.chunk.chunk_id] >= services.delivery_score_cut or i < floor]
+        chunks = [
+            c
+            for i, c in enumerate(chunks)
+            if normalised[c.chunk.chunk_id] >= services.delivery_score_cut or i < floor
+        ]
 
     chunks.sort(key=lambda c: (c.chunk.metadata.act, c.chunk.metadata.article))
 

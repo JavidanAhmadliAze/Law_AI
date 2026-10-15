@@ -6,8 +6,6 @@ from langgraph.graph import MessagesState
 from law_ai.services.agents.schema import ACTS
 
 
-
-
 class AgentInputState(MessagesState):
     pass
 
@@ -20,4 +18,3 @@ class AgentState(MessagesState):
     retrieved: list[dict[str, Any]]
     final_report: str
     acts: list[ACTS]  # the acts that were searched, in order of first search
-

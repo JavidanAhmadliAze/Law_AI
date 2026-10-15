@@ -22,7 +22,10 @@ async def guardian(
 ) -> Command[Literal["query_rewriter", "__end__"]]:
     services = services_from_config(config)
     question = last_human(list(state["messages"]))
-    verdict: GuardianVerdict = await services.fast_llm.generate_structured(
+    llm = services.fast_llm or services.llm
+    if llm is None:
+        raise RuntimeError("guardian needs an LLM in the agent services")
+    verdict: GuardianVerdict = await llm.generate_structured(
         prompt.GUARDIAN, question, GuardianVerdict
     )
     if not verdict.allowed:

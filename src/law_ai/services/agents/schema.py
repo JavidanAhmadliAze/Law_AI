@@ -9,9 +9,9 @@ Nothing here describes retrieval. The Plan's points become searches through
 `prompt.to_queries`, which is checked code, not a model output.
 """
 
-from pydantic import BaseModel, Field
-from typing import Dict
 from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class GuardianVerdict(BaseModel):
@@ -19,13 +19,11 @@ class GuardianVerdict(BaseModel):
     reason: str = Field(description="One of: ok | off_topic | injection | unsafe")
     message: str = Field(default="", description="User-facing refusal text when blocked")
 
-class QueryPlan(BaseModel):
 
-    plan: Dict[str, str] = Field(
+class QueryPlan(BaseModel):
+    plan: dict[str, str] = Field(
         description="A dictionary mapping specific sub-queries to their corresponding act."
     )
-
-
 
 
 ACTS = Literal[

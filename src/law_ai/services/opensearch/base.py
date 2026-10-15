@@ -32,7 +32,6 @@ class BaseSearchService(ABC):
     async def index_chunks(self, chunks: list[LawChunk]) -> int:
         """Embed + upsert chunks (idempotent via chunk_id). Returns count."""
 
-
     @abstractmethod
     async def retrieve(
         self, query: str, *, top_k: int = 5, act: str | None = None

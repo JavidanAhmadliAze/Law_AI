@@ -206,13 +206,25 @@ async def test_delivery_cut_keeps_the_scored_and_one_per_sub_query() -> None:
     sub-query; with it off (default) the top max_chunks are delivered uncut."""
     pool = [_c("a", 1.0), _c("b", 1.0), _c("c", 1.0), _c("d", 1.0)]
     search = _Search({"q1": pool, "q2": pool})
-    reranker = _Reranker({"q1": {"a": 10.0, "b": 9.5, "c": 4.0, "d": 3.0}, "q2": {"a": 2.0, "b": 2.0, "c": 2.0, "d": 2.0}})
-    cfg = lambda **kw: cast(RunnableConfig, {"configurable": {"services": _services(search, reranker, **kw)}})  # noqa: E731
+    reranker = _Reranker(
+        {
+            "q1": {"a": 10.0, "b": 9.5, "c": 4.0, "d": 3.0},
+            "q2": {"a": 2.0, "b": 2.0, "c": 2.0, "d": 2.0},
+        }
+    )
+
+    def cfg(**kw: Any) -> RunnableConfig:
+        return cast(
+            RunnableConfig, {"configurable": {"services": _services(search, reranker, **kw)}}
+        )
+
     uncut = await retriever(_state(["q1", "q2"]), cfg())
     assert [r["chunk_id"] for r in uncut["retrieved"]] == ["a", "b", "c", "d"]
     cut = await retriever(_state(["q1", "q2"]), cfg(delivery_score_cut=0.85, delivery_min_chunks=1))
     # a (1.0) and b (0.95) pass the cut; c and d do not and the floor (2 sub-queries) is already filled
     assert sorted(r["chunk_id"] for r in cut["retrieved"]) == ["a", "b"]
-    floored = await retriever(_state(["q1", "q2"]), cfg(delivery_score_cut=0.99, delivery_min_chunks=1))
+    floored = await retriever(
+        _state(["q1", "q2"]), cfg(delivery_score_cut=0.99, delivery_min_chunks=1)
+    )
     # only a passes 0.99, but the floor of one chunk per sub-query keeps b as well
     assert sorted(r["chunk_id"] for r in floored["retrieved"]) == ["a", "b"]

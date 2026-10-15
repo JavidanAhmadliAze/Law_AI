@@ -25,6 +25,8 @@ async def writer(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     services = services_from_config(config)
     question = last_human(list(state["messages"]))
     provisions = "\n\n".join(state.get("notes", []))
+    if services.llm is None:
+        raise RuntimeError("writer needs an LLM in the agent services")
     parts: list[str] = []
     async for delta in services.llm.stream(
         prompt.WRITER,

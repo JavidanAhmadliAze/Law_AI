@@ -46,3 +46,8 @@ evaluation/datasets/*
 *.jsonl
 dataset_corrected.jsonl
 golden_dataset*.jsonl
+
+# --- LinkedIn post material: embeds a dataset sample, never published to GitHub ---
+subquery_eval/LINKEDIN_POST*
+subquery_eval/diagram_decomposition.py
+subquery_eval/diagram_retrieval.py

@@ -5,6 +5,8 @@ than the answerer when running seriously). Citation accuracy is checked
 deterministically against expected articles — no judge needed for that.
 """
 
+import re
+
 from pydantic import BaseModel, Field
 
 from law_ai.services.llm.base import BaseLLM
@@ -33,9 +35,22 @@ async def judge_answer(llm: BaseLLM, *, question: str, reference: str, answer: s
     )
 
 
-def citation_accuracy(cited_articles: list[str], expected_articles: list[str]) -> float:
+_ARTICLE_RE = re.compile(r"\bArt\.\s*(\d+[a-z]?)", re.IGNORECASE)
+
+
+def cited_articles(answer: str) -> list[str]:
+    """Article references the writer cited inline, e.g. "(Art. 431)".
+
+    Citations live only in the answer's prose — there is no structured field —
+    so they are read back out of the text. Whitespace is normalised so
+    "Art.431" and "Art.  431" compare equal to "Art. 431".
+    """
+    return [f"Art. {num}" for num in _ARTICLE_RE.findall(answer)]
+
+
+def citation_accuracy(cited: list[str], expected_articles: list[str]) -> float:
     """Fraction of citations that point at expected articles (deterministic)."""
-    if not cited_articles:
+    if not cited:
         return 0.0
     expected = set(expected_articles)
-    return sum(1 for a in cited_articles if a in expected) / len(cited_articles)
+    return sum(1 for a in cited if a in expected) / len(cited)

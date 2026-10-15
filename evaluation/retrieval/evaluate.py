@@ -1,7 +1,7 @@
 """Retrieval evaluation — runs golden questions through the search service.
 
 Mirrors the online pipeline: English questions are translated with the same
-translator production uses (LLM when configured, glossary fallback otherwise)
+the query as written — there is no translation step any more
 before retrieval, so the cross-lingual path is what actually gets measured.
 
 Articles are matched act-qualified ("kodeks-cywilny:Art. 691") — bare article
@@ -20,20 +20,6 @@ from evaluation.retrieval import metrics
 from law_ai.dependencies import get_settings
 from law_ai.services.embedding.factory import create_embedder
 from law_ai.services.opensearch.factory import create_search_service
-from law_ai.services.translation.base import BaseTranslator, Direction
-from law_ai.services.translation.client import GlossaryOnlyTranslator
-
-
-def _make_translator(settings: Any) -> tuple[BaseTranslator, str]:
-    """Production translator when the LLM is configured, glossary fallback."""
-    try:
-        from law_ai.services.llm.factory import create_llm
-        from law_ai.services.translation.factory import create_translator
-
-        llm = create_llm(settings)
-        return create_translator(settings, llm=llm), "llm"
-    except Exception:
-        return GlossaryOnlyTranslator(), "glossary-only"
 
 
 def _dedup_articles(chunks: list[Any]) -> list[str]:
@@ -49,7 +35,6 @@ async def evaluate_retrieval(config: EvalConfig) -> dict[str, Any]:
     settings = get_settings()
     embedder = create_embedder(settings)
     search = create_search_service(settings, embedder)
-    translator, translator_kind = _make_translator(settings)
     await search.startup()
 
     rows = [
@@ -61,16 +46,17 @@ async def evaluate_retrieval(config: EvalConfig) -> dict[str, Any]:
     per_query: list[dict[str, Any]] = []
     try:
         for row in rows:
+            # As written, in whatever language the dataset holds. Nothing
+            # translates it: the pipeline's rewriter emits Polish sub-queries
+            # directly, so an EN->PL hop no longer exists to mirror here.
             query = row["question"]
-            if row.get("language") == "en":
-                query = await translator.translate(query, Direction.EN_TO_PL)
             results = await search.retrieve(query, top_k=max(config.k_values))
             retrieved = _dedup_articles(results)
             expected = set(row["expected_articles"])
             per_query.append(
                 {
                     "question": row["question"],
-                    "translated_query": query,
+                    "query": query,
                     "retrieved": retrieved,
                     "expected": sorted(expected),
                     "mrr": metrics.mrr(retrieved, expected),
@@ -97,7 +83,6 @@ async def evaluate_retrieval(config: EvalConfig) -> dict[str, Any]:
 
     summary = {
         "queries": len(per_query),
-        "translator": translator_kind,
         "mrr": round(mean(q["mrr"] for q in per_query), 4),
         **{f"hit@{k}": round(mean(q[f"hit@{k}"] for q in per_query), 4) for k in config.k_values},
         **{

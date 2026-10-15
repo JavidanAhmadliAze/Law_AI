@@ -28,10 +28,7 @@ from evaluation.retrieval import metrics
 from law_ai.dependencies import get_settings
 from law_ai.services.embedding.factory import create_embedder
 from law_ai.services.langfuse.factory import create_langfuse
-from law_ai.services.llm.factory import create_llm
 from law_ai.services.opensearch.factory import create_search_service
-from law_ai.services.translation.base import Direction
-from law_ai.services.translation.factory import create_translator
 
 DATASET_NAME = "civil-retrieval"
 _K = 5
@@ -98,22 +95,22 @@ def main() -> None:
                 search = create_search_service(settings, embedder, tracer=tracer)
                 await search.startup()
                 services["search"] = search
-                services["translator"] = create_translator(settings, llm=create_llm(settings))
         return services
 
     async def task(*, item: Any, **kwargs: Any) -> dict:
         svc = await _ensure_services()
         question = item.input["question"]
+        # The question goes to retrieval as written. There is no translation step
+        # any more: the rewriter emits Polish sub-queries directly, so nothing in
+        # the pipeline renders English into Polish as a separate hop.
         query = question
-        if item.input.get("language") == "en":
-            query = await svc["translator"].translate(query, Direction.EN_TO_PL)
         results = await svc["search"].retrieve(query, top_k=_K)
         retrieved: list[str] = []
         for r in results:
             key = f"{r.chunk.metadata.act}:{r.chunk.metadata.article}"
             if key not in retrieved:
                 retrieved.append(key)
-        return {"translated_query": query, "retrieved": retrieved}
+        return {"query": query, "retrieved": retrieved}
 
     dataset = client.get_dataset(DATASET_NAME)
     run_name = (
@@ -124,7 +121,7 @@ def main() -> None:
         result = dataset.run_experiment(
             name="civil-retrieval",
             run_name=run_name,
-            description="EN→PL LLM translation, hybrid RRF, cross-encoder rerank",
+            description="query decomposition, act-scoped hybrid union, cross-encoder rerank",
             task=task,
             evaluators=[_evaluate],
             max_concurrency=2,  # CPU reranker — don't thrash it

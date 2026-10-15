@@ -7,13 +7,12 @@ from statistics import mean
 from typing import Any
 
 from evaluation.config import EvalConfig
-from evaluation.generation.metrics import citation_accuracy, judge_answer
+from evaluation.generation.metrics import citation_accuracy, cited_articles, judge_answer
 from law_ai.dependencies import get_settings
 from law_ai.services.agents.factory import create_agent_graph
 from law_ai.services.embedding.factory import create_embedder
 from law_ai.services.llm.factory import create_llm
 from law_ai.services.opensearch.factory import create_search_service
-from law_ai.services.translation.factory import create_translator
 
 
 async def evaluate_generation(config: EvalConfig) -> dict[str, Any]:
@@ -21,10 +20,9 @@ async def evaluate_generation(config: EvalConfig) -> dict[str, Any]:
     llm = create_llm(settings)
     embedder = create_embedder(settings)
     search = create_search_service(settings, embedder)
-    translator = create_translator(settings, llm=llm)
     await search.startup()
 
-    graph = create_agent_graph(llm=llm, search=search, translator=translator)
+    graph = create_agent_graph(llm=llm, search=search)
 
     rows = [
         json.loads(line)
@@ -38,7 +36,7 @@ async def evaluate_generation(config: EvalConfig) -> dict[str, Any]:
             result = await graph.ainvoke({"question": row["question"], "history": []})
             final = result.get("final_answer")
             answer_text = final.answer if final else ""
-            cited = [c.article for c in final.citations] if final else []
+            cited = cited_articles(answer_text)
 
             scores = await judge_answer(
                 llm,

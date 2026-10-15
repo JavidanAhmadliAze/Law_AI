@@ -8,13 +8,18 @@ from law_ai.services.agents.context import AgentServices
 from law_ai.services.langfuse.client import LangfuseService
 from law_ai.services.llm.base import BaseLLM
 from law_ai.services.opensearch.base import BaseSearchService
+from law_ai.services.reranker.base import BaseReranker
+
+
 
 
 def create_agent_graph(
     *,
     llm: BaseLLM,
     search: BaseSearchService,
+    reranker: BaseReranker,
     fast_llm: BaseLLM | None = None,
+    reasoning_llm: BaseLLM | None = None,
     settings: Settings,
     checkpointer: Any = None,
     langfuse: LangfuseService | None = None,
@@ -22,10 +27,17 @@ def create_agent_graph(
     services = AgentServices(
         llm=llm,
         fast_llm=fast_llm or llm,
+        reasoning_llm=reasoning_llm or fast_llm or llm,
         search=search,
-        retriever_top_k=settings.agent.retriever_top_k,
-        rerank_budget=settings.agent.rerank_budget,
-        min_candidates_per_query=settings.agent.min_candidates_per_query,
+        reranker=reranker,
+        score_floor=settings.agent.score_floor,
+        max_chunks=settings.agent.max_chunks,
+        rerank_candidates_size=settings.agent.rerank_candidates,
+        max_searches=settings.agent.max_searches,
+        label_bank_path=settings.agent.label_bank_path,
+        decompose_queries=settings.agent.decompose_queries,
+        delivery_score_cut=settings.agent.delivery_score_cut,
+        delivery_min_chunks=settings.agent.delivery_min_chunks,
     )
     handler = langfuse.callback_handler() if langfuse is not None else None
     return build_agentic_rag(

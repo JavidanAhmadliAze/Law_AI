@@ -1,6 +1,6 @@
 """Guardian — the entry gate. Deterministic: one structured LLM call.
 
-Routes with a Command: on to query_rewriter when allowed, straight to END with a
+Routes with a Command: on to planning when allowed, straight to END with a
 refusal message when not (no verdict field needed in the state).
 """
 
@@ -14,11 +14,11 @@ from langgraph.types import Command
 from law_ai.services.agents import prompt
 from law_ai.services.agents.context import last_human, services_from_config
 from law_ai.services.agents.schema import GuardianVerdict
-from law_ai.services.agents.state import AgentOutputState
+from law_ai.services.agents.state import AgentState
 
 
 async def guardian(
-    state: AgentOutputState, config: RunnableConfig
+    state: AgentState, config: RunnableConfig
 ) -> Command[Literal["query_rewriter", "__end__"]]:
     services = services_from_config(config)
     question = last_human(list(state["messages"]))

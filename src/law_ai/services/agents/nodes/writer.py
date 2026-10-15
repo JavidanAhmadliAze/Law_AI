@@ -18,17 +18,22 @@ from langchain_core.runnables import RunnableConfig
 
 from law_ai.services.agents import prompt
 from law_ai.services.agents.context import last_human, services_from_config
-from law_ai.services.agents.state import AgentOutputState
+from law_ai.services.agents.state import AgentState
 
 
-async def writer(state: AgentOutputState, config: RunnableConfig) -> dict[str, Any]:
+async def writer(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     services = services_from_config(config)
     question = last_human(list(state["messages"]))
-    notes = "\n\n".join(state.get("notes", [])) or "(no research notes were gathered)"
+    provisions = "\n\n".join(state.get("notes", []))
     parts: list[str] = []
     async for delta in services.llm.stream(
         prompt.WRITER,
-        f"User question: {question}\n\nResearch notes (verbatim Polish sources):\n{notes}",
+        f"User question: {question}\n\n"
+        + (
+            f"Polish statutory provisions (verbatim):\n{provisions}"
+            if provisions
+            else "No statutory provisions were found for this question."
+        ),
     ):
         parts.append(delta)
     report = "".join(parts)

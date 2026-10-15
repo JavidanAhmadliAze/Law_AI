@@ -1,6 +1,6 @@
 """Cache contract — exact-match memoization of full RAG answers.
 
-A hit skips the entire agent pipeline (translation, retrieval, reranking,
+A hit skips the entire agent pipeline (planning, retrieval, reranking,
 generation), so identical questions answer in milliseconds instead of
 minutes. Keys incorporate the pipeline fingerprint (models, index): swapping
 any model invalidates old entries automatically.

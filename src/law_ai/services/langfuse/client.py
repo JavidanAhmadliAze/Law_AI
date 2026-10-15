@@ -62,5 +62,12 @@ class LangfuseService:
             yield span
 
     def shutdown(self) -> None:
+        """Flush buffered events, then stop the SDK's background worker.
+
+        flush() alone leaves the thread running — on a short-lived process
+        (evaluation runs, CLI scripts) that can hold the interpreter open or
+        drop the tail of the queue.
+        """
         if self._client is not None:
             self._client.flush()
+            self._client.shutdown()

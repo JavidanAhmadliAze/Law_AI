@@ -3,13 +3,13 @@
 The lifespan initializes the database and all services via their factories
 and parks them on app.state; shutdown tears everything down in reverse.
 
-The RAG stack (llm/embedding/opensearch/translation/agents) is optional at
+The RAG stack (llm/embedding/opensearch/reranker/agents) is optional at
 boot: with incomplete model config the API still serves auth/chats/health,
 and /ask answers 503 until the models are configured.
 """
 
 from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
@@ -54,27 +54,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # The agent is injected via get_agentic_rag; assign your compiled graph to
     # app.state.agentic_rag once you build it. Until then /ask/stream returns
     # 503. The RAG services below are booted and parked so the agent can consume
-    # them (llm, search, translator, langfuse, checkpointer).
+    # them (llm, search, langfuse, checkpointer).
     app.state.agentic_rag = None
     app.state.langfuse = None
     app.state.search = None
+    app.state.reranker = None
     app.state.llm = None
-    app.state.translator = None
+    app.state.fast_llm = None
     app.state.checkpointer = None
     try:
         from law_ai.services.embedding.factory import create_embedder
         from law_ai.services.langfuse.factory import create_langfuse
-        from law_ai.services.llm.factory import create_llm
+        from law_ai.services.llm.factory import create_fast_llm, create_llm, create_reasoning_llm
         from law_ai.services.opensearch.factory import create_search_service
-        from law_ai.services.translation.factory import create_translator
+        from law_ai.services.reranker.factory import create_reranker
 
         app.state.llm = create_llm(settings)
+        app.state.fast_llm = create_fast_llm(settings)
+        app.state.reasoning_llm = create_reasoning_llm(settings)
         embedder = create_embedder(settings)
         app.state.langfuse = create_langfuse(settings)
         search = create_search_service(settings, embedder, tracer=app.state.langfuse)
         await search.startup()
         app.state.search = search
-        app.state.translator = create_translator(settings, llm=app.state.llm)
+        app.state.reranker = create_reranker(settings, tracer=app.state.langfuse)
+        with suppress(Exception):  # missing weights must not fail boot
+            await app.state.reranker.warmup()
 
         try:
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -88,13 +93,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.warning("checkpointer.unavailable", error=str(exc))
 
         from law_ai.services.agents.factory import create_agent_graph
-
         app.state.agentic_rag = create_agent_graph(
             llm=app.state.llm,
+            fast_llm=app.state.fast_llm,
+            reasoning_llm=app.state.reasoning_llm,
             search=app.state.search,
-            translator=app.state.translator,
+            reranker=app.state.reranker,
             settings=settings,
             checkpointer=app.state.checkpointer,
+            langfuse=app.state.langfuse,
         )
         logger.info("rag.ready")
     except (ValueError, Exception) as exc:  # noqa: BLE001 — degraded boot is intentional

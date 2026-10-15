@@ -25,6 +25,7 @@ agent internals.
 import json
 import uuid
 from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -35,6 +36,7 @@ from law_ai.dependencies import (
     CacheDep,
     ConversationRepoDep,
     CurrentUserDep,
+    LangfuseDep,
 )
 from law_ai.models.conversation import NEW_CHAT_TITLE
 from law_ai.schemas.chat import AskRequest, AskResponse, ErrorResponse, TokenResponse
@@ -56,6 +58,7 @@ async def ask_stream(
     chats: ConversationRepoDep,
     graph: AgentGraphDep,
     cache: CacheDep,
+    langfuse: LangfuseDep,
 ) -> AskResponse | StreamingResponse:
     """Cache hit → the whole AskResponse as JSON. Miss → an SSE token stream of
     `token` events, then `done`."""
@@ -76,8 +79,19 @@ async def ask_stream(
 
     async def events() -> AsyncIterator[str]:
         # only the new question: the checkpointer supplies the rest of the thread
-        config = {"configurable": {"thread_id": str(chat_id)}}
+        config: dict[str, Any] = {"configurable": {"thread_id": str(chat_id)}}
+        # The tracing callback is bound to the graph itself (agents/factory.py);
+        # here we only add per-request context so a trace can be tied back to a
+        # conversation and a user. Re-adding the handler would double-trace.
+        if langfuse is not None and langfuse.callback_handler() is not None:
+            config["metadata"] = {
+                "langfuse_session_id": str(chat_id),  # groups a conversation's turns
+                "langfuse_user_id": str(user.id),
+                "langfuse_tags": ["ask"],
+            }
         answer_parts: list[str] = []
+        print(f"[ASK] Starting graph for chat={chat_id}")
+        print(f"[ASK] Question={payload.question!r}")
         try:
             async for mode, chunk in graph.astream(
                 {"messages": [HumanMessage(content=payload.question)]},

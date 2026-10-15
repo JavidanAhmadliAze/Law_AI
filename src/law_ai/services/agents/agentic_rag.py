@@ -1,14 +1,18 @@
 """Graph assembly — a straight chain, no loops.
 
-    guardian → query_rewriter → retriever → writer
+    guardian → planning → retriever → writer
 
-Every edge runs exactly once and nothing routes backwards, so a question costs a
-fixed three LLM calls (guardian, rewriter, writer) plus one concurrent burst of
-searches. The only branch is the guardian's refusal, which jumps to END.
+The only loop in the graph is inside the planning subgraph, where a stage that
+broke a checkable rule retries itself once. Everything else runs exactly once,
+so a question costs four LLM calls (guardian, analyse, plan, writer) plus at
+most two retries, and one concurrent burst of searches. The only branch out here
+is the guardian's refusal, which jumps to END.
 
 Breadth that an agent loop would have bought by searching repeatedly is bought
-instead by the rewriter emitting several sub-queries up front — decided once,
-from the question alone, and executed in parallel.
+instead by the planner emitting several sub-queries up front — decided once,
+from the question alone, and executed in parallel. Planning is split in two
+because deciding the institution and wording the searches in one call let a
+misread institution propagate into every sub-query unchecked.
 
 Services (and the tracing callback, when enabled) are bound into the graph's
 config once via .with_config, so they propagate to every node.
@@ -21,10 +25,10 @@ from langgraph.graph import END, START, StateGraph
 
 from law_ai.services.agents.context import AgentServices
 from law_ai.services.agents.nodes.guardian import guardian
-from law_ai.services.agents.nodes.query_rewriter import query_rewriter
 from law_ai.services.agents.nodes.retriever import retriever
 from law_ai.services.agents.nodes.writer import writer
-from law_ai.services.agents.state import AgentInputState, AgentOutputState
+from law_ai.services.agents.state import AgentInputState, AgentState
+from law_ai.services.agents.nodes.query_rewriter import query_rewriter
 
 
 def build_agentic_rag(
@@ -32,14 +36,15 @@ def build_agentic_rag(
     checkpointer: Any = None,
     callbacks: list[Any] | None = None,
 ) -> Any:
-    graph = StateGraph(AgentOutputState, input_schema=AgentInputState)
+    graph = StateGraph(AgentState, input_schema=AgentInputState)
     graph.add_node("guardian", guardian)
+    # A compiled subgraph is a node: its internal retries are its own business,
+    # and only the keys its `finalize` returns reach this state.
     graph.add_node("query_rewriter", query_rewriter)
     graph.add_node("retriever", retriever)
     graph.add_node("writer", writer)
 
     graph.add_edge(START, "guardian")
-    # guardian routes via Command → query_rewriter or END
     graph.add_edge("query_rewriter", "retriever")
     graph.add_edge("retriever", "writer")
     graph.add_edge("writer", END)

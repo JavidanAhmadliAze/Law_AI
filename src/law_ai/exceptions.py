@@ -59,6 +59,10 @@ class RetrievalError(LawAIError):
     detail = "Retrieval failed"
 
 
+class EmbeddingError(LawAIError):
+    detail = "Embedding failed"
+
+
 class GenerationError(LawAIError):
     detail = "Answer generation failed"
 

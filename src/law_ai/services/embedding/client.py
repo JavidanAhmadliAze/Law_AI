@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from law_ai.config import EmbeddingSettings
+from law_ai.exceptions import EmbeddingError
 from law_ai.services.embedding.base import BaseEmbedder
 
 
@@ -35,6 +36,9 @@ class LocalEmbedder(BaseEmbedder):
         return SentenceTransformer(self._settings.model)
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        blank = [i for i, text in enumerate(texts) if not text.strip()]
+        if blank:
+            raise EmbeddingError(f"Cannot embed empty text at positions {blank}")
         model = await self._ensure_model()
         vectors = await asyncio.to_thread(partial(model.encode, texts, normalize_embeddings=True))
         return [v.tolist() for v in vectors]
@@ -55,6 +59,16 @@ class APIEmbedder(BaseEmbedder):
         )
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed every text, batched.
+
+        Blank entries are rejected here rather than at the server: TEI answers
+        empty input with 413, which reads as a payload-size problem and sends
+        you looking at limits and batch sizes instead of at the caller. Raising
+        names the real fault at the boundary where it is still attributable.
+        """
+        blank = [i for i, text in enumerate(texts) if not text.strip()]
+        if blank:
+            raise EmbeddingError(f"Cannot embed empty text at positions {blank}")
         # whole acts are embedded at ingest — batch the requests
         batch_size = self._settings.batch_size
         vectors: list[list[float]] = []

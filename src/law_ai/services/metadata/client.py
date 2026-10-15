@@ -4,7 +4,7 @@ from law_ai.acts import LegalAct
 from law_ai.schemas.chunk import ChunkMetadata, LawChunk
 from law_ai.services.chunking.base import RawChunk
 from law_ai.services.metadata.base import BaseMetadataBuilder
-
+from law_ai.services.metadata.provision import provision_label
 
 class ActMetadataBuilder(BaseMetadataBuilder):
     """Act-agnostic enrichment — everything act-specific comes from the registry."""
@@ -30,6 +30,7 @@ class ActMetadataBuilder(BaseMetadataBuilder):
                         source_url=act.url,
                         language="pl",
                         effective_date=act.effective_date,
+                        provision=provision_label(article=raw.article, text=raw.text)
                     ),
                 )
             )

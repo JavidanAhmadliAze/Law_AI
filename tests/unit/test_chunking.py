@@ -105,3 +105,60 @@ def test_no_articles_falls_back_to_plain_paragraphs() -> None:
     assert len(chunks) == 2
     assert chunks[0].text == "first paragraph"
     assert chunks[1].text == "second paragraph"
+
+
+def test_superscript_article_keeps_its_own_identity() -> None:
+    """ "Art. 556[1]" is not "Art. 556" — it is a separate article.
+
+    Capturing only the leading digits filed 216 Civil Code articles under their
+    base neighbour, so a defect-liability rule and the provision withdrawing it
+    from consumers shared one label.
+    """
+    text = (
+        "Art. 556. Sprzedawca jest odpowiedzialny za wadę.\n\n"
+        "Art. 556[1]. § 1. Wada polega na niezgodności rzeczy z umową.\n"
+        "§ 3. Rzecz ma wadę także w razie nieprawidłowego zamontowania.\n\n"
+        "Art. 556[4]. § 1. Przepisy dotyczące konsumenta stosuje się do osoby fizycznej.\n\n"
+        "Art. 709[18]. Do rat leasingu stosuje się przepisy o sprzedaży na raty.\n"
+    )
+    articles = [c.article for c in ArticleChunker().chunk(text)]
+    assert articles == [
+        "Art. 556",
+        "Art. 556[1]",
+        "Art. 556[1]",  # the continuation paragraph inherits the right article
+        "Art. 556[4]",
+        "Art. 709[18]",
+    ]
+
+
+def test_superscript_header_alone_on_its_line_joins_first_paragraph() -> None:
+    chunks = ArticleChunker().chunk("Art. 449[1].\n§ 1. Odpowiedzialność za produkt.\n")
+    assert chunks[0].article == "Art. 449[1]"
+    assert chunks[0].text.startswith("Art. 449[1].")
+    assert "§ 1." in chunks[0].text
+
+
+def test_multi_letter_article_suffix_is_kept_whole() -> None:
+    """ "Art. 117ba" is not "Art. 117b" — Polish tax law amends by letter run.
+
+    A single optional letter truncated 341 articles, 325 of them in tax acts:
+    the anti-avoidance sequence Art. 119a-119zfn collapsed onto a few labels.
+    """
+    text = (
+        "Art. 117b. § 1. Odpowiedzialność podatnika.\n\n"
+        "Art. 117ba. § 1. Odpowiedzialność nabywcy towaru.\n\n"
+        "Art. 119zfn. Przepis stosuje się odpowiednio.\n\n"
+        "Art. 23za. Wyłączenie stosowania.\n"
+    )
+    assert [c.article for c in ArticleChunker().chunk(text)] == [
+        "Art. 117b",
+        "Art. 117ba",
+        "Art. 119zfn",
+        "Art. 23za",
+    ]
+
+
+def test_article_reference_inside_a_sentence_is_not_a_boundary() -> None:
+    """`[a-z]*` must not swallow the word after a bare number."""
+    chunks = ArticleChunker().chunk("Art. 5 ustawy stosuje się odpowiednio.\n")
+    assert chunks[0].article == "Art. 5"

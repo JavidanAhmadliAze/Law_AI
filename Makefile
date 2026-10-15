@@ -1,5 +1,6 @@
 .PHONY: install lint format typecheck test test-unit test-integration \
-        up down logs migrate migration run dev eval eval-retrieval eval-generation clean
+        up down logs stop-app ingest-up ingest-down ingest-logs stop-ingest \
+        migrate migration run dev eval eval-retrieval eval-generation clean
 
 # ---------------------------------------------------------------- setup ----
 
@@ -34,15 +35,44 @@ test-integration:   ## Requires `make up` first
 	uv run pytest tests/integration -q -m integration
 
 # ---------------------------------------------------------------- infra ----
+#
+# Two stacks, one shared infrastructure layer (docker-compose.infra.yml):
+#   app     = postgres + opensearch + tei + redis + app
+#   ingest  = postgres + opensearch + tei + airflow
+# Both run under project `law-ai`, so the shared containers are the SAME ones.
+# `down` therefore stops infrastructure the other stack may still be using;
+# use `stop-app` / `stop-ingest` to stop only that stack's own service.
 
-up:                 ## Start postgres + opensearch + airflow locally
-	docker compose -f docker/docker-compose.yml up -d
+APP     := docker compose -f docker/docker-compose.yml
+INGEST  := docker compose -f docker/docker-compose.ingest.yml
 
-down:
-	docker compose -f docker/docker-compose.yml down
+
+build:              ## Build the app container (no-op if already built)
+	$(APP) build
+
+up:                 ## Start the application stack (postgres, opensearch, tei, redis, app)
+	$(APP) up -d
+
+down:               ## Stop the application stack AND the shared infrastructure
+	$(APP) down
 
 logs:
-	docker compose -f docker/docker-compose.yml logs -f
+	$(APP) logs -f
+
+stop-app:           ## Stop only the app container, leave infrastructure up
+	$(APP) stop app
+
+ingest-up:          ## Start the ingestion stack (postgres, opensearch, tei, airflow) — UI on :8080
+	$(INGEST) up -d
+
+ingest-down:        ## Stop the ingestion stack AND the shared infrastructure
+	$(INGEST) down
+
+ingest-logs:
+	$(INGEST) logs -f airflow
+
+stop-ingest:        ## Stop only Airflow, leave infrastructure up for the app
+	$(INGEST) stop airflow
 
 # ---------------------------------------------------------------- db ----
 

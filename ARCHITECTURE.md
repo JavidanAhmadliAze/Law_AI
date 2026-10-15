@@ -22,7 +22,10 @@ Law_AI/
 ├── tests/                 # unit / integration / fixtures
 ├── evaluation/            # RAG eval: retrieval + generation (§7)
 ├── migrations/            # Alembic (Postgres)
-├── docker/                # Dockerfile, Dockerfile.airflow, docker-compose.yml
+├── docker/                # Dockerfile(.airflow) + three compose files:
+│                          #   docker-compose.infra.yml  shared: postgres, opensearch, tei
+│                          #   docker-compose.yml        app stack    (+ redis, app)
+│                          #   docker-compose.ingest.yml ingest stack (+ airflow)
 ├── scripts/               # one-off helpers
 ├── .env.example  Makefile  pyproject.toml (uv)  .pre-commit-config.yaml
 └── .github/workflows/ci.yml

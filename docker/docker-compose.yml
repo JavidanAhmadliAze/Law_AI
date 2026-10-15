@@ -1,56 +1,24 @@
+# APPLICATION stack — serves queries against an index the ingestion stack built.
+#
+#   docker compose -f docker/docker-compose.yml up
+#
+# Ingestion (Airflow) is a separate stack: docker/docker-compose.ingest.yml.
+# Both include docker-compose.infra.yml under the same project name, so they
+# share one Postgres, one OpenSearch and one TEI rather than duplicating them.
+#
+# NOTE: while the ingestion stack is running, Compose reports law-ai-airflow-1
+# as an orphan of this file. That warning is expected and harmless — do NOT
+# pass --remove-orphans here, it would delete the running Airflow container.
 name: law-ai
 
+include:
+  - docker-compose.infra.yml
+
 services:
-  postgres:
-    restart: unless-stopped
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES__USER:-lawai}
-      POSTGRES_PASSWORD: ${POSTGRES__PASSWORD:-lawai}
-      POSTGRES_DB: ${POSTGRES__DB:-lawai}
-    ports:
-      - "5434:5432"   # 5432/5433 taken by other local projects
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./init-airflow-db.sql:/docker-entrypoint-initdb.d/init-airflow-db.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lawai"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  opensearch:
-    restart: unless-stopped
-    image: opensearchproject/opensearch:2.17.0
-    environment:
-      discovery.type: single-node
-      DISABLE_SECURITY_PLUGIN: "true"          # local dev only
-      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
-    ports:
-      - "9200:9200"
-    volumes:
-      - opensearch-data:/usr/share/opensearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
-  opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:2.17.0
-    environment:
-      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
-      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
-    ports:
-      - "5601:5601"
-    depends_on:
-      opensearch:
-        condition: service_healthy
-    profiles: ["debug"]                        # start with: docker compose --profile debug up
-
   redis:
     restart: unless-stopped
-    # exact-match RAG answer cache (services/cache); ephemeral by design
+    # exact-match RAG answer cache (services/cache); ephemeral by design.
+    # App-only: the ingestion pipeline has no answers to cache.
     image: redis:7-alpine
     ports:
       - "6381:6379"   # 6379/6380 reserved for the user's other local projects
@@ -59,56 +27,6 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
-
-  tei:
-    restart: unless-stopped
-    # serves embeddings over the TEI protocol — used by Airflow (ingest) and
-    # the app (query embedding); model weights cached in a volume
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
-    command: --model-id ${EMBEDDING__MODEL:-BAAI/bge-m3} --max-client-batch-size 64
-    ports:
-      - "8081:80"
-    volumes:
-      - tei-cache:/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:80/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 80   # first boot downloads the model (~2 GB)
-
-  airflow:
-    restart: unless-stopped
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.airflow
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://lawai:lawai@postgres:5432/airflow
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
-      _AIRFLOW_WWW_USER_CREATE: "true"
-      _AIRFLOW_WWW_USER_USERNAME: admin
-      _AIRFLOW_WWW_USER_PASSWORD: admin
-      # pipeline settings (same env contract as the app)
-      POSTGRES__HOST: postgres
-      OPENSEARCH__HOST: opensearch
-      EMBEDDING__PROVIDER: api
-      EMBEDDING__API_URL: http://tei:80
-      EMBEDDING__MODEL: ${EMBEDDING__MODEL:-BAAI/bge-m3}
-      EMBEDDING__DIMENSION: "1024"
-    ports:
-      - "8080:8080"
-    volumes:
-      - ../airflow/dags:/opt/airflow/dags
-      - ../src:/opt/airflow/src
-      - ../data:/opt/airflow/data   # downloaded PDFs + intermediate artifacts, inspectable from host
-    depends_on:
-      postgres:
-        condition: service_healthy
-      opensearch:
-        condition: service_healthy
-    command: standalone
-    profiles: ["ingest"]                        # offline pipeline only — start with: docker compose --profile ingest up airflow
 
   app:
     build:
@@ -126,6 +44,12 @@ services:
       EMBEDDING__API_URL: http://tei:80
       REDIS__HOST: redis
       REDIS__PORT: "6379"
+    volumes:
+      # The reranker is a local fine-tune, not a Hub id, and the image copies
+      # only src/ — without this the container resolves RERANKER__MODEL to a
+      # path that does not exist and sentence-transformers falls through to the
+      # Hub, where the name is not a repo either. Read-only: nothing writes it.
+      - ../fine_tuning:/app/fine_tuning:ro
     ports:
       - "8000:8000"
     depends_on:
@@ -137,9 +61,3 @@ services:
         condition: service_healthy
       tei:
         condition: service_healthy
-    profiles: ["app"]                          # start with: docker compose --profile app up
-
-volumes:
-  postgres-data:
-  opensearch-data:
-  tei-cache:

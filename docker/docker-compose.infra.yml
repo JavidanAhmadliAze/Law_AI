@@ -1,0 +1,112 @@
+# Infrastructure shared by BOTH stacks (application and ingestion).
+#
+# It is not a stack of its own — docker-compose.yml (app) and
+# docker-compose.ingest.yml (Airflow) each `include` this file, so both resolve
+# to the same project name and therefore the SAME containers. That sharing is
+# the point: the ingestion pipeline writes the OpenSearch index the application
+# reads, and both embed with the same TEI model. Two separate copies would
+# index into one cluster and query another.
+name: law-ai
+
+services:
+  postgres:
+    restart: unless-stopped
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES__USER:-lawai}
+      POSTGRES_PASSWORD: ${POSTGRES__PASSWORD:-lawai}
+      POSTGRES_DB: ${POSTGRES__DB:-lawai}
+    ports:
+      - "5434:5432"   # 5432/5433 taken by other local projects
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # creates the separate `airflow` metadata database on first boot; runs in
+      # both stacks because the cluster is shared, and is a no-op for the app
+      - ./init-airflow-db.sql:/docker-entrypoint-initdb.d/init-airflow-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lawai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  opensearch:
+    restart: unless-stopped
+    # built locally to add analysis-stempel (the Polish stemmer); the stock
+    # image has no Polish analyzer and the corpus is entirely Polish
+    build:
+      context: .
+      dockerfile: Dockerfile.opensearch
+    image: law-ai/opensearch:2.17.0-stempel
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"          # local dev only
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    deploy:
+      resources:
+        # 512m heap + Lucene off-heap and the JVM itself; measured ~700 MB RSS
+        limits:
+          memory: 1300m
+
+  tei:
+    restart: unless-stopped
+    # serves embeddings over the TEI protocol — used by Airflow (ingest) and
+    # the app (query embedding); model weights cached in a volume
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    # --max-batch-tokens caps what TEI batches INTERNALLY, independent of the
+    # client's batch size, and it is what sets peak memory. The 16384 default
+    # packs ~20 full-length legal chunks into one forward pass and pushed the
+    # container past 1.5 GB during ingestion, killing it mid-request (the task
+    # saw `RemoteProtocolError: Server disconnected`). Query-time embedding
+    # sends one short string, so the lower cap costs the app nothing.
+    command: >
+      --model-id ${EMBEDDING__MODEL:-BAAI/bge-m3}
+      --max-client-batch-size 64
+      --max-batch-tokens 4096
+    ports:
+      - "8081:80"
+    volumes:
+      - tei-cache:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 80   # first boot downloads the model (~2 GB)
+    deploy:
+      resources:
+        # bge-m3 weights plus per-batch activations. 1600m was not enough — the
+        # container was killed twice mid-ingest — but the fix was capping
+        # --max-batch-tokens, not the limit: at 4096 tokens TEI completed a full
+        # ingest at 2g with zero restarts. Raising it further only let the ONNX
+        # arena allocator expand (1869 MB -> 2243 MB) and cost host headroom.
+        limits:
+          memory: 2g
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.17.0
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    ports:
+      - "5601:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    profiles: ["debug"]                        # add --profile debug to either stack
+
+volumes:
+  postgres-data:
+  opensearch-data:
+  tei-cache:

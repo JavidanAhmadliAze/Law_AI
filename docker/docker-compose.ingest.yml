@@ -1,0 +1,80 @@
+# INGESTION stack — Airflow plus every container it needs, and nothing else.
+#
+#   docker compose -f docker/docker-compose.ingest.yml up
+#
+# Self-sufficient: bringing this up starts Postgres, OpenSearch and TEI too, so
+# the pipeline runs without the application stack. Airflow needs all three —
+# Postgres for its own metadata database (`airflow`, separate from the app's
+# `lawai`), TEI to embed chunks, OpenSearch to index them.
+#
+# It shares those containers with the application stack rather than copying
+# them: ingestion writes the index the app reads, and both must embed with the
+# same model or the vectors are not comparable.
+#
+# NOTE: while the application stack is running, Compose reports law-ai-app-1
+# and law-ai-redis-1 as orphans of this file. Expected and harmless — do NOT
+# pass --remove-orphans here, it would delete the running application.
+name: law-ai
+
+include:
+  - docker-compose.infra.yml
+
+services:
+  airflow:
+    restart: unless-stopped
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.airflow
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      # Airflow's OWN metadata store (dag runs, task state, scheduler locks) —
+      # the `airflow` database, not the app's. No law data is written here.
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://lawai:lawai@postgres:5432/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+      # pipeline settings (same env contract as the app)
+      POSTGRES__HOST: postgres
+      OPENSEARCH__HOST: opensearch
+      EMBEDDING__PROVIDER: api
+      EMBEDDING__API_URL: http://tei:80
+      EMBEDDING__MODEL: ${EMBEDDING__MODEL:-BAAI/bge-m3}
+      EMBEDDING__DIMENSION: "1024"
+      # 8 GB / 4 cores. Dynamic task mapping fans out ONE TASK INSTANCE PER ACT
+      # (.expand in ingest_domain.py), and `business` holds 11 acts — each a
+      # separate Python process importing law_ai and parsing a multi-hundred-page
+      # PDF. Airflow's defaults (parallelism 32, 16 tasks per DAG) would start
+      # all eleven at once and the host OOM-killer would pick the victim.
+      # Two at a time keeps 4 cores busy without the fan-out.
+      AIRFLOW__CORE__PARALLELISM: "2"
+      AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "2"
+      AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: "1"
+      AIRFLOW__SCHEDULER__PARSING_PROCESSES: "1"
+      # smaller embed batches: TEI holds the whole batch of (up to 8192-token)
+      # sequences in memory at once, and peak matters more than throughput here
+      EMBEDDING__BATCH_SIZE: "8"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+      - ../src:/opt/airflow/src
+      - ../data:/opt/airflow/data   # downloaded PDFs + intermediate artifacts, inspectable from host
+    depends_on:
+      postgres:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      # every task embeds through TEI, and TEI's first boot downloads ~2 GB —
+      # without this a DAG triggered at startup fails on connection refused
+      tei:
+        condition: service_healthy
+    command: standalone
+    # a cap, not a reservation: if a runaway task would otherwise exhaust the
+    # host, Docker kills THIS container (and restarts it) instead of letting the
+    # kernel OOM-killer choose something else on the desktop
+    deploy:
+      resources:
+        limits:
+          memory: 2g

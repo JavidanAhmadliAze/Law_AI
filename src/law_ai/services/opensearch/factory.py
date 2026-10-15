@@ -9,4 +9,4 @@ from law_ai.services.opensearch.client import OpenSearchService
 def create_search_service(
     settings: Settings, embedder: BaseEmbedder, tracer: Any = None
 ) -> BaseSearchService:
-    return OpenSearchService(settings.opensearch, settings.reranker, embedder, tracer=tracer)
+    return OpenSearchService(settings.opensearch, embedder, tracer=tracer)

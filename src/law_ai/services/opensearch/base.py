@@ -2,13 +2,13 @@
 
 This service owns ALL retrieval mechanics: index management, hybrid search
 (dense kNN + sparse BM25 with RRF fusion), metadata filtering and reranking.
-Consumers (agents, Airflow tasks) call `retrieve`/`rerank`/`index_chunks` and
-never touch OpenSearch primitives directly.
+Consumers (agents, Airflow tasks) call `retrieve`/`index_chunks` and never
+touch OpenSearch primitives directly. Reranking is a separate port
+(services/reranker) — it scores pairs with a model and touches no index.
 
-`retrieve` and `rerank` are separate operations on purpose: retrieval is
-query-scoped and cheap, reranking is expensive and query-conditional, so the
-caller chooses the pool to score rather than paying for a rerank on every
-search.
+Retrieval is query-scoped and cheap; reranking is expensive, model-based and
+lives behind its own interface, so a caller chooses what to score rather than
+paying for it on every search.
 """
 
 from abc import ABC, abstractmethod
@@ -32,32 +32,18 @@ class BaseSearchService(ABC):
     async def index_chunks(self, chunks: list[LawChunk]) -> int:
         """Embed + upsert chunks (idempotent via chunk_id). Returns count."""
 
+
     @abstractmethod
     async def retrieve(
-        self,
-        query: str,
-        *,
-        top_k: int = 5,
-        filters: dict[str, str] | None = None,
+        self, query: str, *, top_k: int = 5, act: str | None = None
     ) -> list[RetrievedChunk]:
-        """Hybrid search (dense kNN + BM25, RRF-fused) → top_k chunks.
+        """Hybrid search (dense kNN ∪ BM25) → up to top_k candidate chunks.
 
         No reranking — call `rerank` on the result when you want it.
 
-        `query` must be in Polish (the corpus language) — translation happens
-        upstream in the agent pipeline.
-        """
+        `query` must be in Polish (the corpus language).
 
-    @abstractmethod
-    async def rerank(
-        self,
-        query: str,
-        candidates: list[RetrievedChunk],
-        *,
-        top_k: int | None = None,
-    ) -> list[RetrievedChunk]:
-        """Cross-encoder rerank of a candidate set against `query`.
+        `act` confines BOTH legs to that act_id before scoring, so provisions
+        outside it never compete. None searches everything.
 
-        Accepts candidates from any number of `retrieve` calls, so a caller can
-        pool them and score once. No-op when no reranker is configured.
         """
